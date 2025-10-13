@@ -1,0 +1,398 @@
+
+{
+  "entities": {
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user within the Colombia Connect application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the user entity."
+        },
+        "firstName": {
+          "type": "string",
+          "description": "The first name of the user."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "The last name of the user."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email address of the user.",
+          "format": "email"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "The phone number of the user."
+        },
+        "departmentId": {
+          "type": "string",
+          "description": "Reference to Department. (Relationship: Department 1:N User)"
+        },
+        "cityId": {
+          "type": "string",
+          "description": "Reference to City. (Relationship: City 1:N User)"
+        },
+        "role": {
+          "type": "string",
+          "description": "The role of the user, e.g., PACIENTE, ADMIN, PERSONAL."
+        },
+        "specialty": {
+          "type": "string",
+          "description": "The medical specialty of the user if they are medical personnel."
+        },
+        "professionalRegistration": {
+            "type": "string",
+            "description": "The professional registration number for medical personnel."
+        },
+        "attentionMethods": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Available methods of consultation for medical personnel."
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "email",
+        "phoneNumber",
+        "departmentId",
+        "cityId",
+        "role"
+      ]
+    },
+    "Department": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Department",
+      "type": "object",
+      "description": "Represents a Colombian department.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the department entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the department."
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "City": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "City",
+      "type": "object",
+      "description": "Represents a Colombian city.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the city entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the city."
+        },
+        "departmentId": {
+          "type": "string",
+          "description": "Reference to Department. (Relationship: Department 1:N City)"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "departmentId"
+      ]
+    },
+    "Appointment": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Appointment",
+      "type": "object",
+      "description": "Represents a medical appointment.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the appointment."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user (patient) who booked the appointment."
+        },
+        "doctorId": {
+          "type": "string",
+          "description": "The ID of the doctor for the appointment."
+        },
+        "serviceId": {
+          "type": "string",
+          "description": "The ID of the medical service."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "The date of the appointment."
+        },
+        "time": {
+          "type": "string",
+          "description": "The time of the appointment."
+        },
+        "consultationType": {
+          "type": "string",
+          "enum": ["virtual", "presencial"],
+          "description": "The type of consultation."
+        },
+        "price": {
+            "type": "number",
+            "description": "The price of the appointment."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pendiente", "confirmada", "en curso", "finalizada", "cancelada"],
+          "description": "The status of the appointment."
+        }
+      },
+      "required": ["userId", "doctorId", "serviceId", "date", "time", "consultationType", "status", "price"]
+    },
+    "FormulaMedica": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Fórmula Médica",
+      "type": "object",
+      "description": "Represents a medical prescription.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the prescription."
+        },
+        "userId": {
+          "type": "string",
+          "description": "The ID of the user (patient) this prescription belongs to."
+        },
+        "doctorId": {
+          "type": "string",
+          "description": "The ID of the doctor who issued the prescription."
+        },
+        "doctorName": {
+            "type": "string",
+            "description": "The name of the doctor who issued the prescription."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "The date the prescription was issued."
+        },
+        "medications": {
+            "type": "array",
+            "description": "List of prescribed medications.",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string" },
+                    "dosage": { "type": "string" }
+                },
+                "required": ["name", "dosage"]
+            }
+        },
+        "observations": {
+          "type": "string",
+          "description": "Observations and instructions from the doctor."
+        },
+        "digitalSignature": {
+            "type": "string",
+            "description": "Digital signature of the doctor, could be a data URL."
+        }
+      },
+      "required": ["userId", "doctorId", "doctorName", "date", "medications"]
+    },
+    "Turno": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "title": "Turno Médico",
+        "type": "object",
+        "description": "Represents a doctor's work shift.",
+        "properties": {
+            "id": { "type": "string", "description": "Unique identifier for the shift." },
+            "doctorId": { "type": "string", "description": "The ID of the doctor this shift belongs to." },
+            "date": { "type": "string", "format": "date", "description": "The date of the shift." },
+            "startTime": { "type": "string", "format": "time", "description": "The start time of the shift." },
+            "endTime": { "type": "string", "format": "time", "description": "The end time of the shift." },
+            "type": { "type": "string", "enum": ["6 horas", "12 horas", "24 horas"], "description": "The type or duration of the shift." }
+        },
+        "required": ["doctorId", "date", "startTime", "endTime", "type"]
+    },
+     "Service": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Service",
+      "type": "object",
+      "description": "Represents a medical service offered by the platform.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the service."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the service."
+        },
+        "price": {
+          "type": "number",
+          "description": "The price of the service."
+        },
+        "duration": {
+            "type": "number",
+            "description": "The average duration of the service in minutes."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["activo", "inactivo"],
+          "description": "The status of the service."
+        }
+      },
+      "required": ["id", "name", "price", "duration", "status"]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores user profiles. Includes the 'role' field which is denormalized for authorization independence. The 'userId' parameter corresponds to the Firebase Auth UID.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The Firebase Auth UID of the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/paciente_roles/{userId}",
+        "definition": {
+          "entityName": "paciente_roles",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Collection to store documents indicating a user has the 'PACIENTE' role. The existence of a document with a given 'userId' indicates that the user has this role.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The Firebase Auth UID of the user."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/departments/{departmentId}",
+        "definition": {
+          "entityName": "Department",
+          "schema": {
+            "$ref": "#/backend/entities/Department"
+          },
+          "description": "Stores department information.",
+          "params": [
+            {
+              "name": "departmentId",
+              "description": "The unique identifier of the department."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/cities/{cityId}",
+        "definition": {
+          "entityName": "City",
+          "schema": {
+            "$ref": "#/backend/entities/City"
+          },
+          "description": "Stores city information.",
+          "params": [
+            {
+              "name": "cityId",
+              "description": "The unique identifier of the city."
+            }
+          ]
+        }
+      },
+       {
+        "path": "/appointments/{appointmentId}",
+        "definition": {
+          "entityName": "Appointment",
+          "schema": {
+            "$ref": "#/backend/entities/Appointment"
+          },
+          "description": "Stores all medical appointments for all users.",
+          "params": [
+            {
+              "name": "appointmentId",
+              "description": "The unique identifier of the appointment."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/formulas/{formulaId}",
+        "definition": {
+            "entityName": "FormulaMedica",
+            "schema": {
+                "$ref": "#/backend/entities/FormulaMedica"
+            },
+            "description": "Stores all medical prescriptions for all users.",
+            "params": [
+                {
+                    "name": "formulaId",
+                    "description": "The unique identifier of the medical prescription."
+                }
+            ]
+        }
+      },
+      {
+        "path": "/shifts/{shiftId}",
+        "definition": {
+            "entityName": "Turno",
+            "schema": {
+                "$ref": "#/backend/entities/Turno"
+            },
+            "description": "Stores all work shifts for all doctors.",
+            "params": [
+                {
+                    "name": "shiftId",
+                    "description": "The unique identifier of the shift."
+                }
+            ]
+        }
+      },
+       {
+        "path": "/services/{serviceId}",
+        "definition": {
+            "entityName": "Service",
+            "schema": {
+                "$ref": "#/backend/entities/Service"
+            },
+            "description": "Stores all available medical services.",
+            "params": [
+                {
+                    "name": "serviceId",
+                    "description": "The unique identifier of the service."
+                }
+            ]
+        }
+      }
+    ],
+    "reasoning": "The data structure prioritizes authorization independence and simplifies security rules. We are creating a `users` collection where each document represents a user.  The `role` attribute is stored directly within the user document, which enables us to easily check the user's role without needing to read other documents. This denormalization is key for authorization independence. A separate collection, `paciente_roles`, is used to denote `PACIENTE` roles for new users. The existence of a document in this collection for a user indicates that they have the 'PACIENTE' role. This existence check ensures simple and robust role assignment and verification. This structure supports QAPs as `list` operations on `/users` are secured by checking authentication and potentially filtering on the `role` field, and the `paciente_roles` collection allows for secure listing of all `PACIENTE` roles without exposing sensitive data."
+  }
+}
+
+    

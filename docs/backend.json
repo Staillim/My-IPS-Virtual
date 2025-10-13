@@ -1,0 +1,159 @@
+{
+  "entities": {
+    "User": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "User",
+      "type": "object",
+      "description": "Represents a user in the Colombia Connect application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the User entity."
+        },
+        "firstName": {
+          "type": "string",
+          "description": "The first name of the user."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "The last name of the user."
+        },
+        "email": {
+          "type": "string",
+          "description": "The email address of the user.",
+          "format": "email"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "The phone number of the user."
+        },
+        "departmentId": {
+          "type": "string",
+          "description": "Reference to Department. (Relationship: Department 1:N User)"
+        },
+        "cityId": {
+          "type": "string",
+          "description": "Reference to City. (Relationship: City 1:N User)"
+        },
+        "role": {
+          "type": "string",
+          "description": "The role of the user, e.g., 'admin', 'patient', 'staff'."
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "email",
+        "phoneNumber",
+        "departmentId",
+        "cityId",
+        "role"
+      ]
+    },
+    "Department": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Department",
+      "type": "object",
+      "description": "Represents a Colombian department.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Department entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the department."
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ]
+    },
+    "City": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "City",
+      "type": "object",
+      "description": "Represents a city within a Colombian department.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the City entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the city."
+        },
+        "departmentId": {
+          "type": "string",
+          "description": "Reference to Department. (Relationship: Department 1:N City)"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "departmentId"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "anonymous"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "User",
+          "schema": {
+            "$ref": "#/backend/entities/User"
+          },
+          "description": "Stores user profiles. Path-based ownership for simple security rules.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user.  This is equal to request.auth.uid."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/departments/{departmentId}",
+        "definition": {
+          "entityName": "Department",
+          "schema": {
+            "$ref": "#/backend/entities/Department"
+          },
+          "description": "Stores a list of Colombian departments.",
+          "params": [
+            {
+              "name": "departmentId",
+              "description": "The unique identifier of the department."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/cities/{cityId}",
+        "definition": {
+          "entityName": "City",
+          "schema": {
+            "$ref": "#/backend/entities/City"
+          },
+          "description": "Stores a list of cities within Colombian departments.",
+          "params": [
+            {
+              "name": "cityId",
+              "description": "The unique identifier of the city."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "This Firestore structure prioritizes authorization independence and simplifies security rules. User data is stored under `/users/{userId}`, ensuring path-based ownership and easy management of private user information.  Departments and Cities are stored in root collections for easy access. There are no collaborative features so no membership maps are needed.\n\nThis design achieves Authorization Independence by storing all relevant authorization information within the document itself, avoiding the need for `get()` calls in security rules. It supports secure `list` operations (QAPs) through structural segregation: each collection has a homogeneous security posture, and listing operations are naturally scoped by collection."
+  }
+}
