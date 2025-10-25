@@ -53,11 +53,20 @@ const PatientHistoryDialog = ({ patient }: { patient: any }) => {
     }) || [];
 
     const handleSaveNote = async () => {
-        if (!newNote.trim() || !user) {
+        if (!newNote.trim()) {
             toast({
                 variant: "destructive",
                 title: "Error",
                 description: "Debes escribir una nota antes de guardar.",
+            });
+            return;
+        }
+
+        if (!patient || !patient.id) {
+            toast({
+                variant: "destructive",
+                title: "Error",
+                description: "No se pudo identificar al paciente.",
             });
             return;
         }

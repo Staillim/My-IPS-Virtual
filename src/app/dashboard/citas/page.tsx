@@ -63,7 +63,10 @@ export default function CitasPage() {
 
   // Fetch Services
   const servicesCollectionRef = useMemoFirebase(() => firestore ? collection(firestore, 'services') : null, [firestore]);
-  const { data: services, isLoading: isLoadingServices } = useCollection(servicesCollectionRef);
+  const { data: allServices, isLoading: isLoadingServices } = useCollection(servicesCollectionRef);
+
+  // Filter only active services for patients
+  const services = allServices?.filter(service => service.status === 'activo' || !service.status);
 
   // Fetch Doctors
   const doctorsQuery = useMemoFirebase(() => firestore ? query(collection(firestore, 'users'), where('role', 'not-in', ['PACIENTE', 'ADMIN'])) : null, [firestore]);
@@ -72,7 +75,7 @@ export default function CitasPage() {
   // Fetch User's Appointments
   const appointmentsQuery = useMemoFirebase(() => {
     if (!firestore || !user) return null;
-    return query(collection(firestore, 'appointments'), where('userId', '==', user.uid));
+    return query(collection(firestore, 'appointments'), where('patientId', '==', user.uid));
   }, [firestore, user]);
   const { data: appointments, isLoading: isLoadingAppointments } = useCollection(appointmentsQuery);
 
@@ -86,6 +89,31 @@ export default function CitasPage() {
   }, [firestore, selectedAppointment?.id]);
   const { data: formulas } = useCollection(formulaQuery);
   const associatedFormula = formulas && formulas.length > 0 ? formulas[0] : null;
+
+  // Filter doctors by selected service specialty
+  const filteredDoctors = doctors?.filter(doctor => {
+    if (!selectedService) return true; // Show all if no service selected
+    
+    // Handle both old format (single specialty string) and new format (array of specialties)
+    const serviceSpecialties = selectedService.specialties || (selectedService.specialty ? [selectedService.specialty] : []);
+    
+    if (serviceSpecialties.length === 0) return true; // Show all if no specialties defined
+    
+    // Match doctor's specialty with any of the service's required specialties (case insensitive)
+    return serviceSpecialties.some((specialty: string) => 
+      doctor.specialty?.toLowerCase().trim() === specialty.toLowerCase().trim()
+    );
+  });
+
+  // Reset doctor selection when service changes
+  useEffect(() => {
+    if (selectedService && selectedDoctor) {
+      const isDoctorValid = filteredDoctors?.some(d => d.id === selectedDoctor.id);
+      if (!isDoctorValid) {
+        setSelectedDoctor(null);
+      }
+    }
+  }, [selectedService, selectedDoctor, filteredDoctors]);
 
   // Helper function to parse date string as local date
   const parseLocalDate = (dateString: string): Date => {
@@ -119,7 +147,7 @@ export default function CitasPage() {
     }
 
     const appointmentData = {
-        userId: user.uid,
+        patientId: user.uid,
         doctorId: selectedDoctor.id,
         serviceId: selectedService.id,
         date: `${date.getFullYear()}-${(date.getMonth() + 1).toString().padStart(2, '0')}-${date.getDate().toString().padStart(2, '0')}`,
@@ -267,19 +295,53 @@ export default function CitasPage() {
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Médico</label>
-                  <Select onValueChange={(value) => setSelectedDoctor(doctors?.find(d => d.id === value))} disabled={isLoadingDoctors}>
+                  <Select 
+                    value={selectedDoctor?.id} 
+                    onValueChange={(value) => setSelectedDoctor(filteredDoctors?.find(d => d.id === value))} 
+                    disabled={isLoadingDoctors || !selectedService}
+                  >
                     <SelectTrigger>
                        <User className="mr-2 h-4 w-4 text-muted-foreground" />
-                      <SelectValue placeholder="Selecciona un médico" />
+                      <SelectValue placeholder={
+                        !selectedService 
+                          ? "Primero selecciona un servicio" 
+                          : (() => {
+                              const serviceSpecialties = selectedService.specialties || (selectedService.specialty ? [selectedService.specialty] : []);
+                              if (serviceSpecialties.length === 0) return "Este servicio no tiene especialidades definidas";
+                              if (filteredDoctors && filteredDoctors.length === 0) {
+                                return `No hay médicos con las especialidades requeridas`;
+                              }
+                              return "Selecciona un médico";
+                            })()
+                      } />
                     </SelectTrigger>
                     <SelectContent>
-                      {doctors?.map((doctor) => (
+                      {filteredDoctors?.map((doctor) => (
                          <SelectItem key={doctor.id} value={doctor.id}>
                           {doctor.displayName} ({doctor.specialty})
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
+                  {selectedService && (() => {
+                    const serviceSpecialties = selectedService.specialties || (selectedService.specialty ? [selectedService.specialty] : []);
+                    if (serviceSpecialties.length > 0 && filteredDoctors && filteredDoctors.length === 0) {
+                      return (
+                        <p className="text-xs text-muted-foreground">
+                          No hay médicos con las especialidades requeridas ({serviceSpecialties.join(', ')}). 
+                          Por favor contacta al administrador.
+                        </p>
+                      );
+                    }
+                    if (serviceSpecialties.length === 0) {
+                      return (
+                        <p className="text-xs text-amber-600">
+                          Este servicio no tiene especialidades definidas. Contacta al administrador para configurarlo.
+                        </p>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
                 <div className="space-y-2">
                   <label className="text-sm font-medium">Medio de Consulta</label>

@@ -48,12 +48,28 @@ export default function PatientDashboard() {
     return query(
       collection(firestore, 'formulas'),
       where('patientId', '==', user.uid),
-      where('status', '==', 'activa'),
-      limit(3)
+      where('status', '==', 'activa')
     );
   }, [firestore, user]);
 
   const { data: activeFormulas, isLoading: isLoadingFormulas } = useCollection(activeFormulasQuery);
+
+  // También buscar fórmulas activas con el campo antiguo userId (para compatibilidad)
+  const legacyActiveFormulasQuery = useMemoFirebase(() => {
+    if (!firestore || !user) return null;
+    return query(
+      collection(firestore, 'formulas'),
+      where('userId', '==', user.uid),
+      where('status', '==', 'activa')
+    );
+  }, [firestore, user]);
+
+  const { data: legacyActiveFormulas } = useCollection(legacyActiveFormulasQuery);
+
+  // Combinar ambas listas y eliminar duplicados
+  const allActiveFormulas = [...(activeFormulas || []), ...(legacyActiveFormulas || [])].filter(
+    (formula, index, self) => index === self.findIndex((f) => f.id === formula.id)
+  );
 
   const parseLocalDate = (dateString: string) => {
     const [year, month, day] = dateString.split('-').map(Number);
@@ -178,20 +194,34 @@ export default function PatientDashboard() {
                   <Skeleton className="h-4 w-full" />
                   <Skeleton className="h-4 w-3/4" />
                 </div>
-              ) : activeFormulas && activeFormulas.length > 0 ? (
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-2xl font-bold">{activeFormulas.length}</span>
-                    <Badge variant="outline" className="text-green-600 border-green-600">Activa(s)</Badge>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    {activeFormulas[0].medications?.length || 0} medicamento(s) en tu última fórmula
-                  </p>
-                  <Link href="/dashboard/formulas">
-                    <Button variant="link" size="sm" className="p-0 h-auto text-xs">
-                      Ver todas las fórmulas
-                    </Button>
-                  </Link>
+              ) : allActiveFormulas && allActiveFormulas.length > 0 ? (
+                <div className="space-y-3">
+                  {allActiveFormulas.slice(0, 2).map((formula) => (
+                    <div key={formula.id} className="text-sm border-l-2 border-green-500 pl-3 py-1">
+                      <div className="flex items-center gap-2 mb-1">
+                        <FileText className="h-3 w-3 text-muted-foreground" />
+                        <span className="font-medium">
+                          {formula.doctorName || 'Médico'}
+                        </span>
+                        <Badge variant="outline" className="text-xs text-green-600 border-green-600">
+                          Activa
+                        </Badge>
+                      </div>
+                      <p className="text-muted-foreground text-xs">
+                        {formula.medications?.length || 0} medicamento(s)
+                      </p>
+                      <p className="text-muted-foreground text-xs">
+                        Fecha: {formula.date ? format(new Date(formula.date), "d 'de' MMMM", { locale: es }) : 'N/A'}
+                      </p>
+                    </div>
+                  ))}
+                  {allActiveFormulas && allActiveFormulas.length > 2 && (
+                    <Link href="/dashboard/formulas">
+                      <Button variant="link" size="sm" className="p-0 h-auto text-xs">
+                        Ver todas las fórmulas ({allActiveFormulas.length})
+                      </Button>
+                    </Link>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-muted-foreground">No tienes fórmulas activas.</p>

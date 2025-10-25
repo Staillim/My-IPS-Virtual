@@ -30,10 +30,23 @@ export default function FormulasPage() {
 
   const formulasQuery = useMemoFirebase(() => {
     if (!firestore || !user) return null;
-    return query(collection(firestore, 'formulas'), where('userId', '==', user.uid));
+    return query(collection(firestore, 'formulas'), where('patientId', '==', user.uid));
   }, [firestore, user]);
 
   const { data: formulas, isLoading: isLoadingFormulas } = useCollection(formulasQuery);
+
+  // También buscar fórmulas con el campo antiguo userId (para compatibilidad)
+  const legacyFormulasQuery = useMemoFirebase(() => {
+    if (!firestore || !user) return null;
+    return query(collection(firestore, 'formulas'), where('userId', '==', user.uid));
+  }, [firestore, user]);
+
+  const { data: legacyFormulas } = useCollection(legacyFormulasQuery);
+
+  // Combinar ambas listas y eliminar duplicados
+  const allFormulas = [...(formulas || []), ...(legacyFormulas || [])].filter(
+    (formula, index, self) => index === self.findIndex((f) => f.id === formula.id)
+  );
 
   return (
     <>
@@ -53,7 +66,7 @@ export default function FormulasPage() {
                 <Skeleton className="h-64 w-full" />
             </div>
           )}
-          {formulas?.map((formula) => (
+          {allFormulas?.map((formula) => (
             <Card key={formula.id} className="shadow-md hover:shadow-lg transition-shadow">
               <CardHeader className="border-b">
                 <div className="flex justify-between items-start">
@@ -115,7 +128,7 @@ export default function FormulasPage() {
             </Card>
           ))}
 
-          {!isLoadingFormulas && formulas?.length === 0 && (
+          {!isLoadingFormulas && allFormulas?.length === 0 && (
             <div className="text-center py-16 border-2 border-dashed rounded-lg">
                 <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h3 className="mt-4 text-lg font-medium">No se encontraron fórmulas</h3>

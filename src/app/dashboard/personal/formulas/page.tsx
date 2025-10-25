@@ -90,11 +90,9 @@ export default function PersonalFormulasPage() {
   const patientsQuery = useMemoFirebase(() => firestore ? query(collection(firestore, 'users'), where('role', '==', 'PACIENTE')) : null, [firestore]);
   const { data: allPatients, isLoading: isLoadingPatients } = useCollection(patientsQuery);
 
-  // Obtener pacientes recientes del doctor (basado en fórmulas previas)
-  const recentPatientIds = [...new Set(formulas?.map(f => f.userId) || [])].slice(0, 5);
-  const recentPatients = allPatients?.filter(p => recentPatientIds.includes(p.id)) || [];
-  
-  // Filtrar pacientes por búsqueda
+  // Get unique patient IDs from recent formulas for the "Recent Patients" section
+  const recentPatientIds = [...new Set(formulas?.map(f => f.patientId || f.userId) || [])].slice(0, 5);
+  const recentPatients = allPatients?.filter(p => recentPatientIds.includes(p.id)) || [];  // Filtrar pacientes por búsqueda
   const filteredPatients = allPatients?.filter(patient => 
     patient.displayName?.toLowerCase().includes(patientSearchTerm.toLowerCase()) ||
     patient.email?.toLowerCase().includes(patientSearchTerm.toLowerCase())
@@ -122,7 +120,7 @@ export default function PersonalFormulasPage() {
     }
 
     const formulaData = {
-      userId: patient.id,
+      patientId: patient.id,
       patientName: patient.displayName,
       doctorId: user.uid,
       doctorName: user.displayName,
@@ -135,6 +133,17 @@ export default function PersonalFormulasPage() {
 
     const formulasCol = collection(firestore, 'formulas');
     addDocumentNonBlocking(formulasCol, formulaData);
+
+    // Crear notificación para el paciente
+    const notificationsCol = collection(firestore, 'notifications');
+    addDocumentNonBlocking(notificationsCol, {
+      userId: patient.id,
+      type: 'formula_created',
+      title: 'Fórmula Médica Emitida',
+      message: `El Dr. ${user.displayName} ha emitido una fórmula médica para ti con ${medications.length} medicamento(s). Revísala en la sección de fórmulas.`,
+      read: false,
+      createdAt: new Date(),
+    });
 
     toast({ title: 'Fórmula Creada', description: 'La receta ha sido enviada al paciente.' });
     setOpen(false);

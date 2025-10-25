@@ -208,7 +208,14 @@ export default function PersonalCitasPage() {
       try {
         // Buscar los datos de la cita para obtener el patientId
         const appointment = appointments?.find(a => a.id === appointmentId);
-        if (!appointment) return;
+        if (!appointment || !appointment.patientId) {
+          toast({
+            variant: "destructive",
+            title: "Error",
+            description: "No se pudo encontrar la información de la cita.",
+          });
+          return;
+        }
 
         const appointmentDocRef = doc(firestore, 'appointments', appointmentId);
         await updateDocumentNonBlocking(appointmentDocRef, { status: 'confirmada' });
@@ -268,6 +275,15 @@ export default function PersonalCitasPage() {
 
   const handleCompleteConsultation = async () => {
     if (!firestore || !selectedAppointment || !user) return;
+
+    if (!selectedAppointment.patientId) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudo identificar al paciente de esta cita.",
+      });
+      return;
+    }
 
     if (!diagnosis.description.trim()) {
       toast({

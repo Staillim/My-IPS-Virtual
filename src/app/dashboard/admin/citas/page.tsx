@@ -129,7 +129,7 @@ export default function AdminCitasPage() {
       }
 
       const appointmentData = {
-          userId: patient.id,
+          patientId: patient.id,
           patientName: patient.displayName,
           doctorId: doctor.id,
           doctorName: doctor.displayName,

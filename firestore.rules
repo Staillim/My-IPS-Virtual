@@ -120,17 +120,24 @@ service cloud.firestore {
     /**
      * @description Manages access to formulas (prescriptions) collection.
      * @path /formulas/{formulaId}
-     * @allow (get, list) - Authenticated users can read formulas (filtered by userId or doctorId in queries).
+     * @allow (get, list) - Authenticated users can read formulas (app filters by patientId/doctorId).
      * @allow (create, update, delete) - Authenticated users can manage formulas.
-     * @principle Allows authenticated users to manage prescriptions.
+     * @principle Allows authenticated users to manage prescriptions. App-side queries filter by ownership.
      */
     match /formulas/{formulaId} {
       function isSignedIn() {
         return request.auth != null;
       }
 
+      // Allow all authenticated users to get and list
+      // The app must filter queries by patientId or doctorId
       allow get, list: if isSignedIn();
-      allow create, update, delete: if isSignedIn();
+      
+      // Any authenticated user can create formulas (medical staff creates for patients)
+      allow create: if isSignedIn();
+      
+      // Any authenticated user can update/delete (app-level checks control this)
+      allow update, delete: if isSignedIn();
     }
 
     /**

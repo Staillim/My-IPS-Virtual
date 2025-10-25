@@ -29,7 +29,10 @@ export default function ServiciosPage() {
 
   const firestore = useFirestore();
   const servicesCollectionRef = useMemoFirebase(() => firestore ? collection(firestore, 'services') : null, [firestore]);
-  const { data: services, isLoading: isLoadingServices } = useCollection(servicesCollectionRef);
+  const { data: allServices, isLoading: isLoadingServices } = useCollection(servicesCollectionRef);
+
+  // Filter only active services for patients
+  const services = allServices?.filter(service => service.status === 'activo' || !service.status);
 
 
   return (
