@@ -250,9 +250,13 @@ export default function ProfilePage() {
   function onSubmit(values: z.infer<typeof profileSchema>) {
     if (!userDocRef) return;
     
+    // Obtener el nombre de la ciudad desde el cityId
+    const selectedCityName = cities.find(c => c.id === values.cityId)?.name || values.cityId;
+    
     const dataToUpdate = {
         ...values,
         displayName: `${values.firstName} ${values.lastName}`.trim(),
+        city: selectedCityName, // Guardar el nombre de la ciudad
     };
 
     if(auth.currentUser) {
