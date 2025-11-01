@@ -70,14 +70,27 @@ export default function MedicosPage() {
         return false;
       }
 
-      // Filtro por tipo de consulta (si el doctor tiene esta información)
+      // Filtro por tipo de consulta basado en attentionMethods
       if (selectedConsultationType !== 'cualquiera') {
-        // Asumiendo que el doctor tiene un campo que indica qué tipos de consulta ofrece
-        if (selectedConsultationType === 'virtual' && !doctor.offersVirtual) {
-          return false;
+        const methods = doctor.attentionMethods || [];
+        
+        if (selectedConsultationType === 'virtual') {
+          // Virtual incluye chat, llamada o videollamada
+          const hasVirtualMethod = methods.some((method: string) => 
+            ['chat', 'call', 'video'].includes(method)
+          );
+          if (!hasVirtualMethod) {
+            return false;
+          }
         }
-        if (selectedConsultationType === 'presencial' && !doctor.offersInPerson) {
-          return false;
+        
+        if (selectedConsultationType === 'presencial') {
+          // Presencial requiere que tenga 'presencial' en sus métodos
+          // O si no tiene ningún método de atención definido (asumimos que ofrece presencial)
+          const hasPresencial = methods.includes('presencial') || methods.length === 0;
+          if (!hasPresencial) {
+            return false;
+          }
         }
       }
 
@@ -273,10 +286,31 @@ export default function MedicosPage() {
                 <CardDescription>{doctor.specialty}</CardDescription>
               </CardHeader>
               <CardContent className="flex-grow">
-                <p className="text-sm text-muted-foreground">
-                  {doctor.city && <span className="block mb-1">📍 {doctor.city}</span>}
-                  Disponible para consultas virtuales y presenciales.
-                </p>
+                {doctor.city && (
+                  <p className="text-sm text-muted-foreground mb-2">
+                    📍 {doctor.city}
+                  </p>
+                )}
+                {doctor.attentionMethods && doctor.attentionMethods.length > 0 ? (
+                  <div className="flex flex-wrap gap-1 justify-center">
+                    {doctor.attentionMethods.includes('chat') && (
+                      <Badge variant="secondary" className="text-xs">� Chat</Badge>
+                    )}
+                    {doctor.attentionMethods.includes('call') && (
+                      <Badge variant="secondary" className="text-xs">📞 Llamada</Badge>
+                    )}
+                    {doctor.attentionMethods.includes('video') && (
+                      <Badge variant="secondary" className="text-xs">📹 Video</Badge>
+                    )}
+                    {doctor.attentionMethods.includes('presencial') && (
+                      <Badge variant="secondary" className="text-xs">🏥 Presencial</Badge>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Disponible para consultas
+                  </p>
+                )}
               </CardContent>
               <CardFooter className="w-full p-4">
                 <Button asChild className="w-full">
