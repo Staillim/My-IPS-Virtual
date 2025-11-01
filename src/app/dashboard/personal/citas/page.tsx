@@ -102,6 +102,12 @@ export default function PersonalCitasPage() {
   const [medications, setMedications] = useState<{name: string; dosage: string}[]>([]);
   const [newMedication, setNewMedication] = useState({ name: '', dosage: '' });
   const [formulaObservations, setFormulaObservations] = useState('');
+  
+  // Filtros
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('todas');
+  const [dateFilter, setDateFilter] = useState<Date | undefined>();
+  
   const { user, isUserLoading } = useUser();
   const firestore = useFirestore();
   const { toast } = useToast();
@@ -120,6 +126,64 @@ export default function PersonalCitasPage() {
 
   const { data: appointments, isLoading: isLoadingAppointments } = useCollection(appointmentsQuery);
 
+  // Función auxiliar para parsear fechas locales
+  const parseLocalDate = (dateString: string) => {
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  // Función para obtener la próxima cita
+  const getNextAppointment = () => {
+    if (!appointments || appointments.length === 0) return null;
+    
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    
+    const upcomingAppointments = appointments
+      .filter(apt => {
+        const aptDate = parseLocalDate(apt.date);
+        return aptDate >= now && (apt.status === 'pendiente' || apt.status === 'confirmada');
+      })
+      .sort((a, b) => {
+        const dateA = parseLocalDate(a.date);
+        const dateB = parseLocalDate(b.date);
+        if (dateA.getTime() !== dateB.getTime()) {
+          return dateA.getTime() - dateB.getTime();
+        }
+        return a.time.localeCompare(b.time);
+      });
+    
+    return upcomingAppointments[0] || null;
+  };
+
+  // Filtrar citas
+  const filteredAppointments = appointments?.filter((appointment) => {
+    // Filtro por búsqueda de nombre de paciente
+    if (searchTerm && !appointment.patientName?.toLowerCase().includes(searchTerm.toLowerCase())) {
+      return false;
+    }
+    
+    // Filtro por estado
+    if (statusFilter !== 'todas' && appointment.status !== statusFilter) {
+      return false;
+    }
+    
+    // Filtro por fecha
+    if (dateFilter) {
+      const aptDate = parseLocalDate(appointment.date);
+      const filterDate = new Date(dateFilter);
+      filterDate.setHours(0, 0, 0, 0);
+      aptDate.setHours(0, 0, 0, 0);
+      
+      if (aptDate.getTime() !== filterDate.getTime()) {
+        return false;
+      }
+    }
+    
+    return true;
+  }) || [];
+
+  const nextAppointment = getNextAppointment();
 
  if (isUserLoading || isUserDataLoading) {
     return (
@@ -195,12 +259,6 @@ export default function PersonalCitasPage() {
         </>
      )
   }
-
-  // Helper function to parse date string as local date
-  const parseLocalDate = (dateString: string): Date => {
-    const [year, month, day] = dateString.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
 
   const handleAcceptAppointment = async (appointmentId: string) => {
       if (!firestore || !user) return;
@@ -406,6 +464,8 @@ export default function PersonalCitasPage() {
               <Input
                 placeholder="Buscar por nombre de paciente..."
                 className="pl-10"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <Popover>
@@ -414,12 +474,12 @@ export default function PersonalCitasPage() {
                   variant={'outline'}
                   className={cn(
                     'w-full sm:w-[280px] justify-start text-left font-normal',
-                    !date && 'text-muted-foreground'
+                    !dateFilter && 'text-muted-foreground'
                   )}
                 >
                   <CalendarIcon className="mr-2 h-4 w-4" />
-                  {date ? (
-                    format(date, 'PPP', { locale: es })
+                  {dateFilter ? (
+                    format(dateFilter, 'PPP', { locale: es })
                   ) : (
                     <span>Selecciona una fecha</span>
                   )}
@@ -428,19 +488,19 @@ export default function PersonalCitasPage() {
               <PopoverContent className="w-auto p-0">
                 <Calendar
                   mode="single"
-                  selected={date}
-                  onSelect={setDate}
+                  selected={dateFilter}
+                  onSelect={setDateFilter}
                   initialFocus
                   locale={es}
                 />
               </PopoverContent>
             </Popover>
-            <Select>
+            <Select value={statusFilter} onValueChange={setStatusFilter}>
               <SelectTrigger className="w-full sm:w-[180px]">
                 <SelectValue placeholder="Estado" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="todos">Todos</SelectItem>
+                <SelectItem value="todas">Todas</SelectItem>
                 <SelectItem value="pendiente">Pendiente</SelectItem>
                 <SelectItem value="confirmada">Confirmada</SelectItem>
                 <SelectItem value="en curso">En curso</SelectItem>
@@ -448,9 +508,73 @@ export default function PersonalCitasPage() {
                 <SelectItem value="cancelada">Cancelada</SelectItem>
               </SelectContent>
             </Select>
-            <Button className="w-full sm:w-auto">Aplicar Filtros</Button>
+            {(searchTerm || dateFilter || statusFilter !== 'todas') && (
+              <Button 
+                variant="ghost" 
+                onClick={() => {
+                  setSearchTerm('');
+                  setDateFilter(undefined);
+                  setStatusFilter('todas');
+                }}
+              >
+                Limpiar
+              </Button>
+            )}
           </CardContent>
         </Card>
+
+        {/* Próxima Cita */}
+        {nextAppointment && (
+          <Card className="mt-8 border-primary/50 bg-primary/5">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <CalendarIcon className="h-5 w-5 text-primary" />
+                Próxima Cita
+              </CardTitle>
+              <CardDescription>
+                Tu siguiente cita programada
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Paciente:</span>
+                    <span className="font-semibold">{nextAppointment.patientName}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Fecha:</span>
+                    <span className="font-semibold">
+                      {format(parseLocalDate(nextAppointment.date), "EEEE, d 'de' MMMM", { locale: es })}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Hora:</span>
+                    <span className="font-semibold">{nextAppointment.time}</span>
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Servicio:</span>
+                    <span className="font-semibold">{nextAppointment.serviceName}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm text-muted-foreground">Estado:</span>
+                    <Badge variant={getStatusVariant(nextAppointment.status)}>
+                      {nextAppointment.status}
+                    </Badge>
+                  </div>
+                  {nextAppointment.reason && (
+                    <div className="flex items-start gap-2 mt-2">
+                      <span className="text-sm text-muted-foreground">Motivo:</span>
+                      <span className="text-sm">{nextAppointment.reason}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="mt-8">
           <Card>
@@ -475,7 +599,14 @@ export default function PersonalCitasPage() {
                         <TableCell className="text-right"><Skeleton className="h-8 w-8" /></TableCell>
                     </TableRow>
                   ))}
-                  {appointments?.map((appointment: any) => (
+                  {!isLoadingAppointments && filteredAppointments.length === 0 && (
+                    <TableRow>
+                      <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                        No se encontraron citas con los filtros aplicados.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  {filteredAppointments?.map((appointment: any) => (
                     <TableRow key={appointment.id}>
                       <TableCell className="font-medium">
                         {appointment.patientName}
