@@ -107,6 +107,7 @@ export default function PersonalCitasPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('todas');
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
+  const [sortBy, setSortBy] = useState<'nearest' | 'date'>('nearest');
   
   const { user, isUserLoading } = useUser();
   const firestore = useFirestore();
@@ -181,6 +182,23 @@ export default function PersonalCitasPage() {
     }
     
     return true;
+  }).sort((a, b) => {
+    const dateA = parseLocalDate(a.date);
+    const dateB = parseLocalDate(b.date);
+    
+    if (sortBy === 'nearest') {
+      // Ordenar por fecha y hora más cercana (ascendente)
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateA.getTime() - dateB.getTime();
+      }
+      return a.time.localeCompare(b.time);
+    } else {
+      // Ordenar por fecha (descendente - más reciente primero)
+      if (dateA.getTime() !== dateB.getTime()) {
+        return dateB.getTime() - dateA.getTime();
+      }
+      return b.time.localeCompare(a.time);
+    }
   }) || [];
 
   const nextAppointment = getNextAppointment();
@@ -453,9 +471,9 @@ export default function PersonalCitasPage() {
 
         <Card className="mb-8">
           <CardHeader>
-            <CardTitle>Filtros</CardTitle>
+            <CardTitle>Filtros y Ordenamiento</CardTitle>
             <CardDescription>
-              Busca y filtra las citas por fecha, paciente o estado.
+              Busca, filtra y ordena las citas por fecha, paciente o estado.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col sm:flex-row gap-4 items-center">
@@ -506,6 +524,15 @@ export default function PersonalCitasPage() {
                 <SelectItem value="en curso">En curso</SelectItem>
                 <SelectItem value="finalizada">Finalizada</SelectItem>
                 <SelectItem value="cancelada">Cancelada</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={sortBy} onValueChange={(value: 'nearest' | 'date') => setSortBy(value)}>
+              <SelectTrigger className="w-full sm:w-[180px]">
+                <SelectValue placeholder="Ordenar por" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="nearest">Más cercana</SelectItem>
+                <SelectItem value="date">Por fecha</SelectItem>
               </SelectContent>
             </Select>
             {(searchTerm || dateFilter || statusFilter !== 'todas') && (
@@ -578,6 +605,17 @@ export default function PersonalCitasPage() {
 
         <div className="mt-8">
           <Card>
+            <CardHeader className="pb-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Lista de Citas</CardTitle>
+                  <CardDescription>
+                    Mostrando {filteredAppointments.length} {filteredAppointments.length === 1 ? 'cita' : 'citas'}
+                    {' '}ordenadas por {sortBy === 'nearest' ? 'fecha más cercana' : 'fecha (más reciente primero)'}
+                  </CardDescription>
+                </div>
+              </div>
+            </CardHeader>
             <CardContent className="p-0">
               <Table>
                 <TableHeader>
