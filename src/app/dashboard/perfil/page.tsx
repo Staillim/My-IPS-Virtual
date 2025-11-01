@@ -301,6 +301,7 @@ export default function ProfilePage() {
     { id: 'chat', label: 'Chat' },
     { id: 'call', label: 'Llamada' },
     { id: 'video', label: 'Videollamada' },
+    { id: 'presencial', label: 'Presencial' },
   ];
 
   if (isUserLoading || isUserDataLoading) {
