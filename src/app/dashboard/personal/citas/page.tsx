@@ -46,6 +46,11 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
   MoreHorizontal,
   Search,
   Calendar as CalendarIcon,
@@ -58,6 +63,8 @@ import {
   Plus,
   Trash2,
   Pill,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -83,7 +90,7 @@ const getStatusVariant = (status: string) => {
       return 'default';
     case 'en curso':
       return 'secondary';
-    case 'finalizada':
+    case 'completada':
       return 'outline';
     case 'cancelada':
       return 'destructive';
@@ -103,11 +110,16 @@ export default function PersonalCitasPage() {
   const [newMedication, setNewMedication] = useState({ name: '', dosage: '' });
   const [formulaObservations, setFormulaObservations] = useState('');
   
-  // Filtros
+  // Filtros para citas activas
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('todas');
   const [dateFilter, setDateFilter] = useState<Date | undefined>();
   const [sortBy, setSortBy] = useState<'nearest' | 'date'>('nearest');
+  
+  // Filtros para citas completadas
+  const [completedSearchTerm, setCompletedSearchTerm] = useState('');
+  const [completedDateFilter, setCompletedDateFilter] = useState<Date | undefined>();
+  const [showCompleted, setShowCompleted] = useState(false);
   
   const { user, isUserLoading } = useUser();
   const firestore = useFirestore();
@@ -157,8 +169,17 @@ export default function PersonalCitasPage() {
     return upcomingAppointments[0] || null;
   };
 
-  // Filtrar citas
-  const filteredAppointments = appointments?.filter((appointment) => {
+  // Separar citas activas de completadas
+  const activeAppointments = appointments?.filter(apt => 
+    apt.status !== 'completada' && apt.status !== 'cancelada'
+  ) || [];
+  
+  const completedAppointments = appointments?.filter(apt => 
+    apt.status === 'completada' || apt.status === 'cancelada'
+  ) || [];
+
+  // Filtrar citas activas
+  const filteredActiveAppointments = activeAppointments.filter((appointment) => {
     // Filtro por búsqueda de nombre de paciente
     if (searchTerm && !appointment.patientName?.toLowerCase().includes(searchTerm.toLowerCase())) {
       return false;
@@ -199,7 +220,38 @@ export default function PersonalCitasPage() {
       }
       return b.time.localeCompare(a.time);
     }
-  }) || [];
+  });
+
+  // Filtrar citas completadas
+  const filteredCompletedAppointments = completedAppointments.filter((appointment) => {
+    // Filtro por búsqueda de nombre de paciente
+    if (completedSearchTerm && !appointment.patientName?.toLowerCase().includes(completedSearchTerm.toLowerCase())) {
+      return false;
+    }
+    
+    // Filtro por fecha
+    if (completedDateFilter) {
+      const aptDate = parseLocalDate(appointment.date);
+      const filterDate = new Date(completedDateFilter);
+      filterDate.setHours(0, 0, 0, 0);
+      aptDate.setHours(0, 0, 0, 0);
+      
+      if (aptDate.getTime() !== filterDate.getTime()) {
+        return false;
+      }
+    }
+    
+    return true;
+  }).sort((a, b) => {
+    // Ordenar por fecha descendente (más reciente primero)
+    const dateA = parseLocalDate(a.date);
+    const dateB = parseLocalDate(b.date);
+    
+    if (dateA.getTime() !== dateB.getTime()) {
+      return dateB.getTime() - dateA.getTime();
+    }
+    return b.time.localeCompare(a.time);
+  });
 
   const nextAppointment = getNextAppointment();
 
@@ -522,7 +574,7 @@ export default function PersonalCitasPage() {
                 <SelectItem value="pendiente">Pendiente</SelectItem>
                 <SelectItem value="confirmada">Confirmada</SelectItem>
                 <SelectItem value="en curso">En curso</SelectItem>
-                <SelectItem value="finalizada">Finalizada</SelectItem>
+                <SelectItem value="completada">Completada</SelectItem>
                 <SelectItem value="cancelada">Cancelada</SelectItem>
               </SelectContent>
             </Select>
@@ -608,9 +660,9 @@ export default function PersonalCitasPage() {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <CardTitle>Lista de Citas</CardTitle>
+                  <CardTitle>Citas Activas</CardTitle>
                   <CardDescription>
-                    Mostrando {filteredAppointments.length} {filteredAppointments.length === 1 ? 'cita' : 'citas'}
+                    Mostrando {filteredActiveAppointments.length} {filteredActiveAppointments.length === 1 ? 'cita' : 'citas'}
                     {' '}ordenadas por {sortBy === 'nearest' ? 'fecha más cercana' : 'fecha (más reciente primero)'}
                   </CardDescription>
                 </div>
@@ -637,14 +689,14 @@ export default function PersonalCitasPage() {
                         <TableCell className="text-right"><Skeleton className="h-8 w-8" /></TableCell>
                     </TableRow>
                   ))}
-                  {!isLoadingAppointments && filteredAppointments.length === 0 && (
+                  {!isLoadingAppointments && filteredActiveAppointments.length === 0 && (
                     <TableRow>
                       <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
-                        No se encontraron citas con los filtros aplicados.
+                        No se encontraron citas activas con los filtros aplicados.
                       </TableCell>
                     </TableRow>
                   )}
-                  {filteredAppointments?.map((appointment: any) => (
+                  {filteredActiveAppointments?.map((appointment: any) => (
                     <TableRow key={appointment.id}>
                       <TableCell className="font-medium">
                         {appointment.patientName}
@@ -717,6 +769,154 @@ export default function PersonalCitasPage() {
             </div>
           )}
         </div>
+
+        {/* Sección de Citas Completadas - Desplegable */}
+        <Collapsible open={showCompleted} onOpenChange={setShowCompleted} className="mt-8">
+          <Card>
+            <CollapsibleTrigger asChild>
+              <CardHeader className="cursor-pointer hover:bg-muted/50 transition-colors">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <CheckCircle className="h-5 w-5 text-green-600" />
+                      Citas Completadas
+                      <Badge variant="secondary" className="ml-2">
+                        {filteredCompletedAppointments.length}
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      Historial de citas completadas y canceladas
+                    </CardDescription>
+                  </div>
+                  {showCompleted ? (
+                    <ChevronUp className="h-5 w-5 text-muted-foreground" />
+                  ) : (
+                    <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                  )}
+                </div>
+              </CardHeader>
+            </CollapsibleTrigger>
+            
+            <CollapsibleContent>
+              {/* Filtros para citas completadas */}
+              <CardContent className="border-t pt-4">
+                <div className="flex flex-col sm:flex-row gap-4 mb-4">
+                  <div className="relative flex-grow">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-5 w-5 text-muted-foreground" />
+                    <Input
+                      placeholder="Buscar por nombre de paciente..."
+                      className="pl-10"
+                      value={completedSearchTerm}
+                      onChange={(e) => setCompletedSearchTerm(e.target.value)}
+                    />
+                  </div>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant={'outline'}
+                        className={cn(
+                          'w-full sm:w-[280px] justify-start text-left font-normal',
+                          !completedDateFilter && 'text-muted-foreground'
+                        )}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {completedDateFilter ? (
+                          format(completedDateFilter, 'PPP', { locale: es })
+                        ) : (
+                          <span>Filtrar por fecha</span>
+                        )}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={completedDateFilter}
+                        onSelect={setCompletedDateFilter}
+                        initialFocus
+                        locale={es}
+                      />
+                    </PopoverContent>
+                  </Popover>
+                  {(completedSearchTerm || completedDateFilter) && (
+                    <Button 
+                      variant="ghost" 
+                      onClick={() => {
+                        setCompletedSearchTerm('');
+                        setCompletedDateFilter(undefined);
+                      }}
+                    >
+                      Limpiar
+                    </Button>
+                  )}
+                </div>
+
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Paciente</TableHead>
+                      <TableHead>Fecha y Hora</TableHead>
+                      <TableHead>Servicio</TableHead>
+                      <TableHead>Estado</TableHead>
+                      <TableHead className="text-right">Acciones</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredCompletedAppointments.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={5} className="text-center py-8 text-muted-foreground">
+                          No se encontraron citas completadas con los filtros aplicados.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                    {filteredCompletedAppointments.map((appointment: any) => (
+                      <TableRow key={appointment.id}>
+                        <TableCell className="font-medium">
+                          {appointment.patientName}
+                        </TableCell>
+                        <TableCell>
+                          {format(parseLocalDate(appointment.date), 'PPP', {
+                            locale: es,
+                          })}{' '}
+                          a las {appointment.time}
+                        </TableCell>
+                        <TableCell>{appointment.serviceName}</TableCell>
+                        <TableCell>
+                          <Badge variant={getStatusVariant(appointment.status)}>
+                            {appointment.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button variant="ghost" className="h-8 w-8 p-0">
+                                <span className="sr-only">Abrir menú</span>
+                                <MoreHorizontal className="h-4 w-4" />
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end">
+                              <DropdownMenuItem asChild>
+                                <Link href={`/dashboard/historial?patientId=${appointment.patientId}`}>
+                                  <FileText className="mr-2 h-4 w-4" />
+                                  Ver historial médico
+                                </Link>
+                              </DropdownMenuItem>
+                              {appointment.diagnosis && (
+                                <DropdownMenuItem>
+                                  <Info className="mr-2 h-4 w-4" />
+                                  Ver diagnóstico
+                                </DropdownMenuItem>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </CollapsibleContent>
+          </Card>
+        </Collapsible>
 
         {/* Dialog para completar consulta con diagnóstico */}
         <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
