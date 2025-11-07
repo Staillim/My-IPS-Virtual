@@ -141,6 +141,60 @@ service cloud.firestore {
     }
 
     /**
+     * @description Manages formula renewal requests.
+     * @path /formulaRenewalRequests/{requestId}
+     * @allow (create) - Patients can create renewal requests for their formulas
+     * @allow (list, get) - Patients can read their own requests; Doctors can read requests assigned to them
+     * @allow (update) - Doctors can update request status (approve/reject)
+     * @deny (delete) - Requests should not be deleted for audit trail
+     * @principle Patients request renewals; doctors review and respond
+     * @fields patientId, doctorId, formulaId, medications, reason, status (pendiente/aprobada/rechazada), createdAt, respondedAt
+     */
+    match /formulaRenewalRequests/{requestId} {
+      function isSignedIn() {
+        return request.auth != null;
+      }
+
+      function isPatient() {
+        return request.auth != null && 
+               request.resource.data.patientId == request.auth.uid;
+      }
+
+      function isRequestPatient() {
+        return request.auth != null && 
+               resource != null && 
+               resource.data.patientId == request.auth.uid;
+      }
+
+      function isRequestDoctor() {
+        return request.auth != null && 
+               resource != null && 
+               resource.data.doctorId == request.auth.uid;
+      }
+
+      // Patients can create renewal requests for themselves
+      allow create: if isSignedIn() && isPatient() && 
+                       request.resource.data.keys().hasAll(['formulaId', 'patientId', 'doctorId', 'medications', 'reason', 'status']) &&
+                       request.resource.data.status == 'pendiente';
+      
+      // Patients can read their own requests; doctors can read requests assigned to them
+      allow get: if isSignedIn() && (isRequestPatient() || isRequestDoctor());
+      
+      // For list queries: allow if authenticated (app-side queries filter by patientId or doctorId)
+      allow list: if isSignedIn();
+      
+      // Doctors can update request status (approve/reject)
+      // Only allow changing status and adding respondedAt field
+      allow update: if isSignedIn() && 
+                       isRequestDoctor() && 
+                       request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'respondedAt']) &&
+                       request.resource.data.status in ['aprobada', 'rechazada'];
+      
+      // Don't allow deletion for audit trail
+      allow delete: if false;
+    }
+
+    /**
      * @description Manages access to services collection.
      * @path /services/{serviceId}
      * @allow (get, list) - Authenticated users can read services.
@@ -159,15 +213,19 @@ service cloud.firestore {
     /**
      * @description Manages access to shifts (work schedules) collection.
      * @path /shifts/{shiftId}
-     * @allow (get, list) - Authenticated users can read shifts.
-     * @allow (create, update, delete) - Authenticated users can manage shifts.
-     * @principle Allows authenticated users to view and manage work shifts.
+     * @allow (get, list) - Any authenticated user can read shifts (app-level filtering applies)
+     * @allow (create, update, delete) - Any authenticated user can manage shifts (app-level controls apply)
+     * @principle Simplified permissions - application handles role-based access control
+     * @fields doctorId, doctorName, doctorRole, doctorSpecialty, startDate, endDate, startTime, endTime, type, durationHours, nocturno, recargoPercent, spansMidnight, area, observations, status
+     * @status values: próximo, activo, finalizado (computed dynamically in client based on current time)
      */
     match /shifts/{shiftId} {
       function isSignedIn() {
         return request.auth != null;
       }
 
+      // Simplified: all authenticated users can read and write
+      // Application layer enforces role-based restrictions
       allow get, list: if isSignedIn();
       allow create, update, delete: if isSignedIn();
     }

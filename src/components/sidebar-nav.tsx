@@ -41,6 +41,7 @@ const personalNavLinks = [
   { href: "/dashboard/personal/citas", icon: Calendar, label: "Mis Citas" },
   { href: "/dashboard/personal/pacientes", icon: Users, label: "Pacientes" },
   { href: "/dashboard/personal/formulas", icon: FileText, label: "Fórmulas" },
+  { href: "/dashboard/personal/turnos", icon: Clock, label: "Mis Turnos" },
 ];
 
 const adminNavLinks = [

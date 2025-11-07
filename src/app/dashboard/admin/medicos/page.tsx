@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Header } from '@/components/header';
 import {
   Card,
@@ -56,8 +56,11 @@ import {
 } from '@/components/ui/select';
 import Link from 'next/link';
 import { useCollection, useFirestore, useMemoFirebase } from '@/firebase';
-import { collection, query, where } from 'firebase/firestore';
-import { addDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { collection, query, where, doc } from 'firebase/firestore';
+import { addDocumentNonBlocking, updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
+import { SHIFT_TEMPLATES, ShiftTemplateKey, computeShiftStatus, createShiftDocFromTemplate } from '@/lib/shifts';
+import { format } from 'date-fns';
+import { es } from 'date-fns/locale';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
 
@@ -75,6 +78,11 @@ const getStatusVariant = (status: string) => {
 export default function AdminMedicosPage() {
   const [open, setOpen] = useState(false);
   const [newDoctor, setNewDoctor] = useState({ fullName: '', email: '', specialty: '' });
+  const [assignForDoctorId, setAssignForDoctorId] = useState<string | null>(null);
+  const [assignTemplate, setAssignTemplate] = useState<'' | ShiftTemplateKey>('');
+  const [assignDate, setAssignDate] = useState<Date | undefined>();
+  const [assignArea, setAssignArea] = useState<string>('');
+  const [assignObs, setAssignObs] = useState<string>('');
   
   const firestore = useFirestore();
   const { toast } = useToast();
@@ -86,6 +94,34 @@ export default function AdminMedicosPage() {
     [firestore]
   );
   const { data: medicos, isLoading: isLoadingMedicos } = useCollection(medicosQuery);
+
+  // Fetch all shifts (kept simple; optimize with range queries later if needed)
+  const shiftsRef = useMemoFirebase(() => firestore ? collection(firestore, 'shifts') : null, [firestore]);
+  const { data: shifts } = useCollection(shiftsRef);
+
+  const activeShiftByDoctor = useMemo(() => {
+    const map = new Map<string, any>();
+    shifts?.forEach((s: any) => {
+      const status = computeShiftStatus({
+        doctorId: s.doctorId,
+        doctorName: s.doctorName,
+        startDate: s.startDate || s.date,
+        endDate: s.endDate || s.startDate || s.date,
+        startTime: s.startTime,
+        endTime: s.endTime,
+        type: s.type,
+        durationHours: s.durationHours || 0,
+        nocturno: !!s.nocturno,
+        recargoPercent: s.recargoPercent || 0,
+        spansMidnight: !!s.spansMidnight || (s.endTime < s.startTime),
+        status: s.status,
+      } as any);
+      if (status === 'activo') {
+        map.set(s.doctorId, s);
+      }
+    });
+    return map;
+  }, [shifts]);
 
   const handleRegisterDoctor = () => {
     if (!newDoctor.fullName || !newDoctor.email || !newDoctor.specialty) {
@@ -232,9 +268,11 @@ export default function AdminMedicosPage() {
                     </TableCell>
                     <TableCell>{medico.specialty}</TableCell>
                     <TableCell>
-                       <Badge variant={getStatusVariant(medico.status || 'activo')}>
-                        {medico.status ? (medico.status.charAt(0).toUpperCase() + medico.status.slice(1)) : 'Activo'}
-                      </Badge>
+                      {activeShiftByDoctor.has(medico.id) ? (
+                        <Badge variant={getStatusVariant('activo')}>En turno</Badge>
+                      ) : (
+                        <Badge variant={getStatusVariant('inactivo')}>Fuera de turno</Badge>
+                      )}
                     </TableCell>
                     <TableCell className="text-right">
                        <DropdownMenu>
@@ -253,10 +291,24 @@ export default function AdminMedicosPage() {
                             </Link>
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
-                           <DropdownMenuItem className={medico.status === 'activo' ? 'text-destructive focus:text-destructive' : ''}>
-                           {medico.status === 'activo' ? <ToggleLeft className="mr-2 h-4 w-4" /> : <ToggleRight className="mr-2 h-4 w-4" />}
-                            {medico.status === 'activo' ? 'Desactivar' : 'Activar'}
-                          </DropdownMenuItem>
+                           {activeShiftByDoctor.has(medico.id) ? (
+                             <DropdownMenuItem
+                               className="text-destructive focus:text-destructive"
+                               onClick={() => {
+                                 const s = activeShiftByDoctor.get(medico.id);
+                                 if (!firestore || !s) return;
+                                 const ref = doc(firestore, 'shifts', s.id);
+                                 updateDocumentNonBlocking(ref, { status: 'finalizado' });
+                                 toast({ title: 'Turno finalizado', description: `Se finalizó el turno actual de ${medico.displayName}.` });
+                               }}
+                             >
+                               <ToggleLeft className="mr-2 h-4 w-4" /> Finalizar turno actual
+                             </DropdownMenuItem>
+                           ) : (
+                             <DropdownMenuItem onClick={() => setAssignForDoctorId(medico.id)}>
+                               <ToggleRight className="mr-2 h-4 w-4" /> Asignar turno
+                             </DropdownMenuItem>
+                           )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -266,6 +318,100 @@ export default function AdminMedicosPage() {
             </Table>
           </CardContent>
         </Card>
+
+        {/* Dialogo Asignar turno rápido */}
+  <Dialog open={!!assignForDoctorId} onOpenChange={(o) => !o && (setAssignForDoctorId(null), setAssignTemplate(''), setAssignDate(undefined), setAssignArea(''), setAssignObs(''))}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Asignar turno</DialogTitle>
+              <DialogDescription>Selecciona tipo y fecha para asignar un turno al médico.</DialogDescription>
+            </DialogHeader>
+            <div className="grid gap-4 py-4">
+              <div className="space-y-2">
+                <Label>Tipo de turno</Label>
+                <Select onValueChange={(v: ShiftTemplateKey) => setAssignTemplate(v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar tipo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Object.values(SHIFT_TEMPLATES).map(t => (
+                      <SelectItem key={t.key} value={t.key}>{t.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Fecha</Label>
+                <Input type="date" value={assignDate ? format(assignDate, 'yyyy-MM-dd') : ''} onChange={(e) => setAssignDate(e.target.value ? new Date(e.target.value + 'T00:00:00') : undefined)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Área / Servicio</Label>
+                <Select onValueChange={(v) => setAssignArea(v)}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar área" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Urgencias">Urgencias</SelectItem>
+                    <SelectItem value="Consulta Externa">Consulta Externa</SelectItem>
+                    <SelectItem value="Pediatría">Pediatría</SelectItem>
+                    <SelectItem value="Medicina General">Medicina General</SelectItem>
+                    <SelectItem value="Cardiología">Cardiología</SelectItem>
+                    <SelectItem value="Dermatología">Dermatología</SelectItem>
+                    <SelectItem value="Psicología">Psicología</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Observaciones</Label>
+                <Input placeholder="Ej: Turno diurno completo" value={assignObs} onChange={(e) => setAssignObs(e.target.value)} />
+              </div>
+              {assignTemplate && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <Label>Inicio</Label>
+                    <Input disabled value={SHIFT_TEMPLATES[assignTemplate].startTime} />
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Fin</Label>
+                    <Input disabled value={SHIFT_TEMPLATES[assignTemplate].endTime} />
+                  </div>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary">Cancelar</Button>
+              </DialogClose>
+              <Button
+                onClick={() => {
+                  const doctor = medicos?.find((m: any) => m.id === assignForDoctorId);
+                  if (!doctor || !assignTemplate || !assignDate || !assignArea || !firestore) {
+                    toast({ variant: 'destructive', title: 'Faltan datos', description: 'Selecciona tipo, fecha y área.' });
+                    return;
+                  }
+                  const docToAdd = createShiftDocFromTemplate(assignTemplate, { id: doctor.id, displayName: doctor.displayName }, assignDate);
+                  const colRef = collection(firestore, 'shifts');
+                  addDocumentNonBlocking(colRef, {
+                    ...docToAdd,
+                    date: docToAdd.startDate,
+                    area: assignArea,
+                    observations: assignObs,
+                    doctorRole: doctor.role,
+                    doctorSpecialty: doctor.specialty,
+                  });
+                  toast({ title: 'Turno asignado', description: `Asignado ${docToAdd.type} a ${doctor.displayName}.` });
+                  setAssignForDoctorId(null);
+                  setAssignTemplate('');
+                  setAssignDate(undefined);
+                  setAssignArea('');
+                  setAssignObs('');
+                }}
+              >
+                <PlusCircle className="mr-2 h-4 w-4" /> Asignar
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </>
   );

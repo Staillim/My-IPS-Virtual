@@ -18,19 +18,43 @@ import {
   Download,
   Search,
   Repeat,
+  X,
+  Pill,
+  Clock,
+  AlertCircle,
 } from 'lucide-react';
 import Image from 'next/image';
 import { useCollection, useFirestore, useUser, useMemoFirebase, useDoc } from '@/firebase';
-import { collection, query, where, doc } from 'firebase/firestore';
+import { collection, query, where, doc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { Skeleton } from '@/components/ui/skeleton';
 import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Textarea } from '@/components/ui/textarea';
+import { Label } from '@/components/ui/label';
+import { useState } from 'react';
+import { useToast } from '@/hooks/use-toast';
 
 export default function FormulasPage() {
   const { user, isUserLoading } = useUser();
   const firestore = useFirestore();
+  const { toast } = useToast();
+
+  // Estados para los diálogos
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [renewalDialogOpen, setRenewalDialogOpen] = useState(false);
+  const [selectedFormula, setSelectedFormula] = useState<any>(null);
+  const [renewalReason, setRenewalReason] = useState('');
+  const [isSubmittingRenewal, setIsSubmittingRenewal] = useState(false);
 
   // Obtener datos del usuario para el PDF
   const userDocRef = useMemoFirebase(() => {
@@ -55,10 +79,102 @@ export default function FormulasPage() {
 
   const { data: legacyFormulas } = useCollection(legacyFormulasQuery);
 
+  // Obtener solicitudes de renovación del paciente
+  const renewalRequestsQuery = useMemoFirebase(() => {
+    if (!firestore || !user) return null;
+    return query(collection(firestore, 'formulaRenewalRequests'), where('patientId', '==', user.uid));
+  }, [firestore, user]);
+
+  const { data: renewalRequests } = useCollection(renewalRequestsQuery);
+
   // Combinar ambas listas y eliminar duplicados
   const allFormulas = [...(formulas || []), ...(legacyFormulas || [])].filter(
     (formula, index, self) => index === self.findIndex((f) => f.id === formula.id)
   );
+
+  // Función para verificar si una fórmula tiene una solicitud de renovación
+  const getRenewalRequestForFormula = (formulaId: string) => {
+    return renewalRequests?.find(req => req.formulaId === formulaId);
+  };
+
+  // Funciones para manejar los diálogos
+  const handleOpenDetails = (formula: any) => {
+    setSelectedFormula(formula);
+    setDetailsDialogOpen(true);
+  };
+
+  const handleCloseDetails = () => {
+    setDetailsDialogOpen(false);
+    setSelectedFormula(null);
+  };
+
+  const handleOpenRenewal = (formula: any) => {
+    setSelectedFormula(formula);
+    setRenewalReason('');
+    setRenewalDialogOpen(true);
+  };
+
+  const handleCloseRenewal = () => {
+    setRenewalDialogOpen(false);
+    setSelectedFormula(null);
+    setRenewalReason('');
+  };
+
+  const handleSubmitRenewal = async () => {
+    if (!renewalReason.trim() || !selectedFormula || !user || !firestore) {
+      toast({
+        title: 'Error',
+        description: 'Por favor proporciona un motivo para la renovación.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    setIsSubmittingRenewal(true);
+
+    try {
+      // Crear solicitud de renovación en Firestore
+      await addDoc(collection(firestore, 'formulaRenewalRequests'), {
+        formulaId: selectedFormula.id,
+        patientId: user.uid,
+        patientName: userData?.displayName || `${userData?.firstName || ''} ${userData?.lastName || ''}`.trim() || 'Paciente',
+        doctorId: selectedFormula.doctorId,
+        doctorName: selectedFormula.doctorName,
+        originalDate: selectedFormula.date,
+        medications: selectedFormula.medications,
+        reason: renewalReason.trim(),
+        status: 'pendiente',
+        createdAt: serverTimestamp(),
+      });
+
+      // Crear notificación para el médico
+      await addDoc(collection(firestore, 'notifications'), {
+        userId: selectedFormula.doctorId,
+        type: 'renewal_request',
+        title: 'Nueva solicitud de renovación de fórmula',
+        message: `${userData?.displayName || 'Un paciente'} ha solicitado renovar una fórmula médica.`,
+        read: false,
+        createdAt: serverTimestamp(),
+        formulaId: selectedFormula.id,
+      });
+
+      toast({
+        title: 'Solicitud enviada',
+        description: 'Tu solicitud de renovación ha sido enviada al médico.',
+      });
+
+      handleCloseRenewal();
+    } catch (error) {
+      console.error('Error al enviar solicitud de renovación:', error);
+      toast({
+        title: 'Error',
+        description: 'No se pudo enviar la solicitud. Intenta de nuevo.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsSubmittingRenewal(false);
+    }
+  };
 
   // Función para generar PDF de fórmula médica
   const generateFormulaPDF = (formula: any) => {
@@ -452,7 +568,11 @@ export default function FormulasPage() {
                 )}
               </CardContent>
               <CardFooter className="flex flex-wrap gap-2 justify-end bg-muted/30 p-4 border-t">
-                <Button variant="outline" size="sm">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => handleOpenDetails(formula)}
+                >
                   <Search className="mr-2 h-4 w-4" />
                   Ver Detalles
                 </Button>
@@ -464,10 +584,66 @@ export default function FormulasPage() {
                   <Download className="mr-2 h-4 w-4" />
                   Descargar PDF
                 </Button>
-                <Button variant="outline" size="sm">
-                  <Repeat className="mr-2 h-4 w-4" />
-                  Solicitar Renovación
-                </Button>
+                {(() => {
+                  const renewalRequest = getRenewalRequestForFormula(formula.id);
+                  
+                  if (renewalRequest?.status === 'pendiente') {
+                    return (
+                      <Button 
+                        variant="secondary" 
+                        size="sm"
+                        disabled
+                      >
+                        <Clock className="mr-2 h-4 w-4" />
+                        Renovación Pendiente
+                      </Button>
+                    );
+                  }
+                  
+                  if (renewalRequest?.status === 'rechazada') {
+                    return (
+                      <div className="flex flex-col gap-1">
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          disabled
+                          className="cursor-not-allowed opacity-60"
+                        >
+                          <X className="mr-2 h-4 w-4" />
+                          No Necesaria
+                        </Button>
+                        <p className="text-xs text-muted-foreground text-center">
+                          Agenda una cita para evaluación
+                        </p>
+                      </div>
+                    );
+                  }
+                  
+                  if (renewalRequest?.status === 'aprobada') {
+                    return (
+                      <Button 
+                        variant="secondary" 
+                        size="sm"
+                        disabled
+                        className="opacity-60"
+                      >
+                        <Repeat className="mr-2 h-4 w-4" />
+                        Ya Renovada
+                      </Button>
+                    );
+                  }
+                  
+                  return (
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => handleOpenRenewal(formula)}
+                    >
+                      <Repeat className="mr-2 h-4 w-4" />
+                      Solicitar Renovación
+                    </Button>
+                  );
+                })()}
               </CardFooter>
             </Card>
           ))}
@@ -482,6 +658,228 @@ export default function FormulasPage() {
             </div>
           )}
         </div>
+
+        {/* Diálogo Ver Detalles */}
+        <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+          <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2 text-xl">
+                <FileText className="h-5 w-5 text-primary" />
+                Detalles de la Fórmula Médica
+              </DialogTitle>
+              <DialogDescription>
+                Información completa de la prescripción médica
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedFormula && (
+              <div className="space-y-6 py-4">
+                {/* Información General */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-muted/30 rounded-lg">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Médico Prescriptor</Label>
+                    <p className="font-medium flex items-center gap-2 mt-1">
+                      <Stethoscope className="h-4 w-4 text-primary" />
+                      Dr. {selectedFormula.doctorName}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Fecha de Emisión</Label>
+                    <p className="font-medium flex items-center gap-2 mt-1">
+                      <Calendar className="h-4 w-4 text-primary" />
+                      {format(new Date(selectedFormula.date), "dd 'de' MMMM 'de' yyyy", { locale: es })}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Estado</Label>
+                    <div className="mt-1">
+                      <Badge className="bg-green-500 hover:bg-green-600">Vigente</Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">Código de Fórmula</Label>
+                    <p className="font-mono text-sm mt-1">{selectedFormula.id.substring(0, 12).toUpperCase()}</p>
+                  </div>
+                </div>
+
+                {/* Medicamentos */}
+                <div>
+                  <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                    <Pill className="h-5 w-5 text-primary" />
+                    Medicamentos Recetados
+                  </h3>
+                  <div className="space-y-3">
+                    {selectedFormula.medications.map((med: any, index: number) => (
+                      <div key={index} className="p-4 border rounded-lg hover:bg-muted/30 transition-colors">
+                        <div className="flex items-start gap-3">
+                          <div className="bg-primary/10 p-2 rounded-full">
+                            <span className="font-bold text-primary">{index + 1}</span>
+                          </div>
+                          <div className="flex-1">
+                            <p className="font-semibold text-base">{med.name}</p>
+                            <div className="flex items-center gap-2 mt-1 text-sm text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              <span>{med.dosage}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Observaciones */}
+                {selectedFormula.observations && selectedFormula.observations.trim() !== '' && (
+                  <div>
+                    <h3 className="font-semibold text-lg mb-3 flex items-center gap-2">
+                      <AlertCircle className="h-5 w-5 text-primary" />
+                      Observaciones e Indicaciones
+                    </h3>
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
+                      <p className="text-sm leading-relaxed whitespace-pre-line">
+                        {selectedFormula.observations}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Firma Digital */}
+                {selectedFormula.digitalSignature && (
+                  <div className="border-t pt-6">
+                    <Label className="text-sm text-muted-foreground mb-2 block">Firma Digital del Médico</Label>
+                    <div className="flex justify-center">
+                      <div className="relative h-20 w-48 border rounded-lg p-2 bg-white">
+                        <Image
+                          src={selectedFormula.digitalSignature}
+                          alt={`Firma de ${selectedFormula.doctorName}`}
+                          width={192}
+                          height={80}
+                          style={{ objectFit: "contain" }}
+                        />
+                      </div>
+                    </div>
+                    <p className="text-center text-xs text-muted-foreground mt-2">
+                      Dr. {selectedFormula.doctorName} - Firma Autorizada
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button variant="outline" onClick={handleCloseDetails}>
+                Cerrar
+              </Button>
+              {selectedFormula && (
+                <Button onClick={() => {
+                  generateFormulaPDF(selectedFormula);
+                  handleCloseDetails();
+                }}>
+                  <Download className="mr-2 h-4 w-4" />
+                  Descargar PDF
+                </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Diálogo Solicitar Renovación */}
+        <Dialog open={renewalDialogOpen} onOpenChange={setRenewalDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Repeat className="h-5 w-5 text-primary" />
+                Solicitar Renovación de Fórmula
+              </DialogTitle>
+              <DialogDescription>
+                Envía una solicitud al médico para renovar esta fórmula médica
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedFormula && (
+              <div className="space-y-4 py-4">
+                {/* Información de la fórmula a renovar */}
+                <div className="p-4 bg-muted/30 rounded-lg space-y-2">
+                  <div className="flex items-center gap-2 text-sm">
+                    <Stethoscope className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Médico:</span>
+                    <span className="font-medium">Dr. {selectedFormula.doctorName}</span>
+                  </div>
+                  <div className="flex items-center gap-2 text-sm">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Fecha original:</span>
+                    <span className="font-medium">
+                      {format(new Date(selectedFormula.date), "dd 'de' MMMM 'de' yyyy", { locale: es })}
+                    </span>
+                  </div>
+                  <div className="mt-3">
+                    <Label className="text-xs text-muted-foreground">Medicamentos</Label>
+                    <ul className="mt-1 space-y-1">
+                      {selectedFormula.medications.map((med: any, index: number) => (
+                        <li key={index} className="text-sm flex items-center gap-2">
+                          <Pill className="h-3 w-3 text-primary" />
+                          <span className="font-medium">{med.name}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+
+                {/* Motivo de renovación */}
+                <div className="space-y-2">
+                  <Label htmlFor="renewal-reason">
+                    Motivo de la renovación <span className="text-destructive">*</span>
+                  </Label>
+                  <Textarea
+                    id="renewal-reason"
+                    placeholder="Explica por qué necesitas renovar esta fórmula (ej: tratamiento continuo, medicamentos agotados, etc.)"
+                    value={renewalReason}
+                    onChange={(e) => setRenewalReason(e.target.value)}
+                    rows={4}
+                    className="resize-none"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    El médico recibirá una notificación con tu solicitud y podrá aprobar o rechazar la renovación.
+                  </p>
+                </div>
+
+                {/* Advertencia */}
+                <div className="flex items-start gap-3 p-3 bg-yellow-50 dark:bg-yellow-950/20 border border-yellow-200 dark:border-yellow-800 rounded-lg">
+                  <AlertCircle className="h-5 w-5 text-yellow-600 dark:text-yellow-500 mt-0.5 flex-shrink-0" />
+                  <div className="text-sm">
+                    <p className="font-medium text-yellow-800 dark:text-yellow-200">Importante</p>
+                    <p className="text-yellow-700 dark:text-yellow-300 mt-1">
+                      Esta es solo una solicitud. El médico evaluará si es apropiado renovar la fórmula y te notificará su decisión.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter className="gap-2">
+              <Button 
+                variant="outline" 
+                onClick={handleCloseRenewal}
+                disabled={isSubmittingRenewal}
+              >
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleSubmitRenewal}
+                disabled={!renewalReason.trim() || isSubmittingRenewal}
+              >
+                {isSubmittingRenewal ? (
+                  <>Enviando...</>
+                ) : (
+                  <>
+                    <Repeat className="mr-2 h-4 w-4" />
+                    Enviar Solicitud
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </>
   );
