@@ -29,7 +29,7 @@ const adminNavLinks = [
   { href: "/dashboard/admin/medicos", icon: Users, label: "Médicos" },
   { href: "/dashboard/admin/citas", icon: Calendar, label: "Citas" },
   { href: "/dashboard/admin/servicios", icon: Briefcase, label: "Servicios" },
-  { href: "/dashboard/admin/reportes", icon: FolderOpen, label: "Historias" },
+  { href: "/dashboard/admin/estadisticas", icon: BarChart3, label: "Estadísticas" },
 ];
 
 

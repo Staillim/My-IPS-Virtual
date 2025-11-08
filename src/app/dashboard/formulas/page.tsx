@@ -92,6 +92,13 @@ export default function FormulasPage() {
     (formula, index, self) => index === self.findIndex((f) => f.id === formula.id)
   );
 
+  // Ordenar fórmulas: más recientes primero
+  const sortedFormulas = allFormulas.sort((a, b) => {
+    const dateA = new Date(a.date);
+    const dateB = new Date(b.date);
+    return dateB.getTime() - dateA.getTime(); // Descendente (más reciente primero)
+  });
+
   // Función para verificar si una fórmula tiene una solicitud de renovación
   const getRenewalRequestForFormula = (formulaId: string) => {
     return renewalRequests?.find(req => req.formulaId === formulaId);
@@ -203,6 +210,22 @@ export default function FormulasPage() {
     doc.setFontSize(9);
     doc.setFont('helvetica', 'italic');
     doc.text(`Fecha de Emisión: ${format(new Date(formula.date), 'dd/MM/yyyy', { locale: es })}`, pageWidth - 14, yPosition, { align: 'right' });
+    yPosition += 5;
+    
+    // Fecha de vencimiento
+    if (formula.expirationDate) {
+      const expirationDateObj = new Date(formula.expirationDate);
+      const isExpired = expirationDateObj < new Date();
+      
+      if (isExpired) {
+        doc.setTextColor(220, 38, 38); // Rojo
+        doc.text(`⚠ VENCIDA: ${format(expirationDateObj, 'dd/MM/yyyy', { locale: es })}`, pageWidth - 14, yPosition, { align: 'right' });
+      } else {
+        doc.setTextColor(22, 163, 74); // Verde
+        doc.text(`Válida hasta: ${format(expirationDateObj, 'dd/MM/yyyy', { locale: es })}`, pageWidth - 14, yPosition, { align: 'right' });
+      }
+      doc.setTextColor(0, 0, 0); // Volver a negro
+    }
     yPosition += 10;
 
     // Información del paciente
@@ -362,7 +385,7 @@ export default function FormulasPage() {
 
   // Función para generar PDF con todas las fórmulas
   const generateAllFormulasPDF = () => {
-    if (!allFormulas || allFormulas.length === 0) return;
+    if (!sortedFormulas || sortedFormulas.length === 0) return;
 
     const doc = new jsPDF();
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -388,10 +411,10 @@ export default function FormulasPage() {
     doc.text(`Generado el ${format(new Date(), 'dd/MM/yyyy', { locale: es })}`, pageWidth / 2, 150, { align: 'center' });
     
     doc.setFontSize(16);
-    doc.text(`Total de Fórmulas: ${allFormulas.length}`, pageWidth / 2, 180, { align: 'center' });
+    doc.text(`Total de Fórmulas: ${sortedFormulas.length}`, pageWidth / 2, 180, { align: 'center' });
 
     // Iterar por cada fórmula
-    allFormulas.forEach((formula, index) => {
+    sortedFormulas.forEach((formula, index) => {
       doc.addPage();
       let yPosition = 20;
       doc.setTextColor(0, 0, 0);
@@ -507,10 +530,10 @@ export default function FormulasPage() {
               Consulta el historial de tus fórmulas médicas.
             </p>
           </div>
-          {allFormulas && allFormulas.length > 0 && (
+          {sortedFormulas && sortedFormulas.length > 0 && (
             <Button onClick={generateAllFormulasPDF} size="default" className="gap-2">
               <Download className="h-4 w-4" />
-              Descargar Todas ({allFormulas.length})
+              Descargar Todas ({sortedFormulas.length})
             </Button>
           )}
         </div>
@@ -522,7 +545,7 @@ export default function FormulasPage() {
                 <Skeleton className="h-64 w-full" />
             </div>
           )}
-          {allFormulas?.map((formula) => (
+          {sortedFormulas?.map((formula) => (
             <Card key={formula.id} className="shadow-md hover:shadow-lg transition-shadow">
               <CardHeader className="border-b">
                 <div className="flex justify-between items-start">
@@ -533,7 +556,12 @@ export default function FormulasPage() {
                         </CardTitle>
                         <CardDescription className="flex flex-col sm:flex-row sm:items-center gap-x-4 gap-y-1 mt-2">
                             <span className="flex items-center"><Stethoscope className="mr-2 h-4 w-4" /> {formula.doctorName}</span>
-                            <span className="flex items-center"><Calendar className="mr-2 h-4 w-4" /> {new Date(formula.date).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                            <span className="flex items-center"><Calendar className="mr-2 h-4 w-4" /> Emitida: {new Date(formula.date).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })}</span>
+                            {formula.expirationDate && (
+                              <span className={`flex items-center ${formula.expirationDate < new Date().toISOString().split('T')[0] ? 'text-red-600 font-semibold' : 'text-green-600'}`}>
+                                <Clock className="mr-2 h-4 w-4" /> Válida hasta: {new Date(formula.expirationDate).toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' })}
+                              </span>
+                            )}
                         </CardDescription>
                     </div>
                     <Badge>Vigente</Badge>
@@ -648,7 +676,7 @@ export default function FormulasPage() {
             </Card>
           ))}
 
-          {!isLoadingFormulas && allFormulas?.length === 0 && (
+          {!isLoadingFormulas && sortedFormulas?.length === 0 && (
             <div className="text-center py-16 border-2 border-dashed rounded-lg">
                 <FileText className="mx-auto h-12 w-12 text-muted-foreground" />
                 <h3 className="mt-4 text-lg font-medium">No se encontraron fórmulas</h3>
@@ -690,6 +718,15 @@ export default function FormulasPage() {
                       {format(new Date(selectedFormula.date), "dd 'de' MMMM 'de' yyyy", { locale: es })}
                     </p>
                   </div>
+                  {selectedFormula.expirationDate && (
+                    <div>
+                      <Label className="text-xs text-muted-foreground">Fecha de Vencimiento</Label>
+                      <p className={`font-medium flex items-center gap-2 mt-1 ${selectedFormula.expirationDate < new Date().toISOString().split('T')[0] ? 'text-red-600' : 'text-green-600'}`}>
+                        <Clock className="h-4 w-4" />
+                        {format(new Date(selectedFormula.expirationDate), "dd 'de' MMMM 'de' yyyy", { locale: es })}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <Label className="text-xs text-muted-foreground">Estado</Label>
                     <div className="mt-1">

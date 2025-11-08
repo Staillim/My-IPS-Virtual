@@ -71,6 +71,15 @@ const PatientHistoryDialog = ({ patient }: { patient: any }) => {
             return;
         }
 
+        if (!user) {
+            toast({
+                variant: 'destructive',
+                title: 'Error',
+                description: 'Usuario no autenticado.',
+            });
+            return;
+        }
+
         const noteData = {
             patientId: patient.id,
             patientName: patient.displayName,

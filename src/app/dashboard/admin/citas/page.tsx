@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from '@/components/header';
 import {
   Card,
@@ -40,8 +40,10 @@ import {
   PlusCircle,
   XCircle,
   FileText,
-  CalendarPlus,
   Calendar as CalendarIcon,
+  AlertTriangle,
+  Check,
+  CalendarClock,
 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -59,6 +61,17 @@ import {
   DialogFooter,
   DialogClose,
 } from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Textarea } from '@/components/ui/textarea';
 import { format } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -75,8 +88,10 @@ const getStatusVariant = (status: string) => {
       return 'default';
     case 'en curso':
       return 'secondary';
-    case 'finalizada':
+    case 'completada':
       return 'outline';
+    case 'expirada':
+      return 'secondary';
     case 'cancelada':
       return 'destructive';
     default:
@@ -87,6 +102,15 @@ const getStatusVariant = (status: string) => {
 export default function AdminCitasPage() {
   const [date, setDate] = useState<Date | undefined>();
   const [open, setOpen] = useState(false);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
+  const [cancelDialogOpen, setCancelDialogOpen] = useState(false);
+  const [rescheduleDialogOpen, setRescheduleDialogOpen] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<any>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [appointmentToCancel, setAppointmentToCancel] = useState<any>(null);
+  const [appointmentToReschedule, setAppointmentToReschedule] = useState<any>(null);
+  const [newDate, setNewDate] = useState<Date | undefined>();
+  const [newTime, setNewTime] = useState<string>('');
 
   const firestore = useFirestore();
   const { toast } = useToast();
@@ -94,6 +118,30 @@ export default function AdminCitasPage() {
   // Fetch all appointments
   const appointmentsCollectionRef = useMemoFirebase(() => firestore ? collection(firestore, 'appointments') : null, [firestore]);
   const { data: appointments, isLoading: isLoadingAppointments } = useCollection(appointmentsCollectionRef);
+
+  // Ordenar citas: pendientes primero, luego por fecha
+  const sortedAppointments = appointments?.slice().sort((a, b) => {
+    // Orden de prioridad de estados
+    const statusPriority: { [key: string]: number } = {
+      'pendiente': 1,
+      'confirmada': 2,
+      'en curso': 3,
+      'completada': 4,
+      'expirada': 5,
+      'cancelada': 6,
+    };
+
+    const priorityA = statusPriority[a.status || 'pendiente'] || 999;
+    const priorityB = statusPriority[b.status || 'pendiente'] || 999;
+
+    // Si tienen diferente prioridad, ordenar por prioridad
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+
+    // Si tienen la misma prioridad, ordenar por fecha (más reciente primero)
+    return new Date(b.date).getTime() - new Date(a.date).getTime();
+  });
 
   // Fetch doctors (users with a role other than PACIENTE or ADMIN)
   const doctorsQuery = useMemoFirebase(() => firestore ? query(collection(firestore, 'users'), where('role', 'not-in', ['PACIENTE', 'ADMIN'])) : null, [firestore]);
@@ -113,6 +161,45 @@ export default function AdminCitasPage() {
     doctorId: '',
     serviceId: '',
   });
+
+  // Helper function to parse date string as local date
+  const parseLocalDate = (dateString: string): Date => {
+    const [year, month, day] = dateString.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  // Efecto para finalizar citas vencidas automáticamente
+  useEffect(() => {
+    if (!firestore || !appointments) return;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0); // Inicio del día actual
+
+    appointments.forEach((appointment: any) => {
+      // Solo procesar citas que no están completadas, canceladas o ya expiradas
+      if (appointment.status === 'completada' || 
+          appointment.status === 'cancelada' || 
+          appointment.status === 'expirada') {
+        return;
+      }
+
+      const appointmentDate = parseLocalDate(appointment.date);
+      appointmentDate.setHours(0, 0, 0, 0);
+
+      // Si la fecha de la cita es anterior a hoy, marcarla como expirada
+      if (appointmentDate < today) {
+        const appointmentDocRef = doc(firestore, 'appointments', appointment.id);
+        
+        updateDocumentNonBlocking(appointmentDocRef, {
+          status: 'expirada',
+          expiredAt: new Date(),
+          expiredReason: 'Cita vencida - no se completó en la fecha programada',
+        });
+
+        console.log(`Cita ${appointment.id} marcada como expirada (fecha: ${appointment.date})`);
+      }
+    });
+  }, [appointments, firestore]);
 
   const handleCreateAppointment = () => {
       const patient = patients?.find(p => p.id === newAppointment.patientId);
@@ -157,34 +244,202 @@ export default function AdminCitasPage() {
       setNewAppointment({ patientId: '', doctorId: '', serviceId: '' });
   }
 
-  // Helper function to parse date string as local date
-  const parseLocalDate = (dateString: string): Date => {
-    const [year, month, day] = dateString.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
+  const handleCancelAppointment = async () => {
+      if (!firestore || !appointmentToCancel) return;
 
-  const handleAcceptAppointment = (appointmentId: string) => {
-      if (firestore) {
-          const appointmentDocRef = doc(firestore, 'appointments', appointmentId);
-          updateDocumentNonBlocking(appointmentDocRef, { status: 'accepted' });
-
-          toast({
-              title: "Cita Aceptada",
-              description: `La cita con ID ${appointmentId} ha sido aceptada exitosamente.`,
+      try {
+          const appointmentDocRef = doc(firestore, 'appointments', appointmentToCancel.id);
+          
+          // Actualizar la cita con estado cancelada, motivo y registro de auditoría
+          await updateDocumentNonBlocking(appointmentDocRef, { 
+              status: 'cancelada',
+              cancellationReason: cancelReason,
+              cancelledBy: 'admin',
+              cancelledAt: new Date(),
           });
-      }
-  };
 
-  const handleCancelAppointment = (appointmentId: string) => {
-      if (firestore) {
-          const appointmentDocRef = doc(firestore, 'appointments', appointmentId);
-          updateDocumentNonBlocking(appointmentDocRef, { status: 'cancelada' });
+          // Crear notificación para el paciente
+          const notificationsCol = collection(firestore, 'notifications');
+          await addDocumentNonBlocking(notificationsCol, {
+              userId: appointmentToCancel.patientId,
+              type: 'appointment_cancelled',
+              title: 'Cita Cancelada',
+              message: `Tu cita del ${format(parseLocalDate(appointmentToCancel.date), "d 'de' MMMM", { locale: es })} a las ${appointmentToCancel.time} ha sido cancelada por la administración.${cancelReason ? ` Motivo: ${cancelReason}` : ''}`,
+              relatedId: appointmentToCancel.id,
+              read: false,
+              createdAt: new Date(),
+          });
+
+          // Crear notificación para el médico
+          await addDocumentNonBlocking(notificationsCol, {
+              userId: appointmentToCancel.doctorId,
+              type: 'appointment_cancelled',
+              title: 'Cita Cancelada',
+              message: `La cita con ${appointmentToCancel.patientName} del ${format(parseLocalDate(appointmentToCancel.date), "d 'de' MMMM", { locale: es })} a las ${appointmentToCancel.time} ha sido cancelada por la administración.${cancelReason ? ` Motivo: ${cancelReason}` : ''}`,
+              relatedId: appointmentToCancel.id,
+              read: false,
+              createdAt: new Date(),
+          });
 
           toast({
               title: "Cita Cancelada",
-              description: `La cita con ID ${appointmentId} ha sido cancelada exitosamente.`,
+              description: `La cita ha sido cancelada exitosamente. Se ha notificado al paciente y al médico.`,
+          });
+
+          setCancelDialogOpen(false);
+          setAppointmentToCancel(null);
+          setCancelReason('');
+          setDetailsDialogOpen(false);
+      } catch (error) {
+          console.error('Error cancelling appointment:', error);
+          toast({
+              variant: "destructive",
+              title: "Error",
+              description: "No se pudo cancelar la cita. Intenta nuevamente.",
           });
       }
+  };
+
+  const handleOpenCancelDialog = (appointment: any) => {
+      setAppointmentToCancel(appointment);
+      setCancelDialogOpen(true);
+  };
+
+  const handleViewDetails = (appointment: any) => {
+    setSelectedAppointment(appointment);
+    setDetailsDialogOpen(true);
+  };
+
+  const handleAcceptAppointment = async (appointment: any) => {
+    if (!firestore) return;
+
+    try {
+      const appointmentDocRef = doc(firestore, 'appointments', appointment.id);
+      
+      // Actualizar el estado de la cita a confirmada
+      await updateDocumentNonBlocking(appointmentDocRef, { 
+        status: 'confirmada',
+        confirmedBy: 'admin',
+        confirmedAt: new Date(),
+      });
+
+      // Crear notificación para el paciente
+      const notificationsCol = collection(firestore, 'notifications');
+      await addDocumentNonBlocking(notificationsCol, {
+        userId: appointment.patientId,
+        type: 'appointment_confirmed',
+        title: 'Cita Confirmada',
+        message: `Tu cita del ${format(parseLocalDate(appointment.date), "d 'de' MMMM", { locale: es })} a las ${appointment.time} con ${appointment.doctorName} ha sido confirmada.`,
+        relatedId: appointment.id,
+        read: false,
+        createdAt: new Date(),
+      });
+
+      // Crear notificación para el médico
+      await addDocumentNonBlocking(notificationsCol, {
+        userId: appointment.doctorId,
+        type: 'appointment_confirmed',
+        title: 'Cita Confirmada',
+        message: `La cita con ${appointment.patientName} del ${format(parseLocalDate(appointment.date), "d 'de' MMMM", { locale: es })} a las ${appointment.time} ha sido confirmada.`,
+        relatedId: appointment.id,
+        read: false,
+        createdAt: new Date(),
+      });
+
+      toast({
+        title: "Cita Confirmada",
+        description: `La cita ha sido confirmada exitosamente. Se ha notificado al paciente y al médico.`,
+      });
+    } catch (error) {
+      console.error('Error accepting appointment:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudo confirmar la cita. Intenta nuevamente.",
+      });
+    }
+  };
+
+  const handleOpenRescheduleDialog = (appointment: any) => {
+    setAppointmentToReschedule(appointment);
+    setNewDate(parseLocalDate(appointment.date));
+    setNewTime(appointment.time);
+    setRescheduleDialogOpen(true);
+  };
+
+  const handleRescheduleAppointment = async () => {
+    if (!firestore || !appointmentToReschedule || !newDate || !newTime) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Por favor, selecciona una nueva fecha y hora.",
+      });
+      return;
+    }
+
+    try {
+      const appointmentDocRef = doc(firestore, 'appointments', appointmentToReschedule.id);
+      
+      const oldDate = format(parseLocalDate(appointmentToReschedule.date), "d 'de' MMMM", { locale: es });
+      const oldTime = appointmentToReschedule.time;
+      
+      const formattedNewDate = `${newDate.getFullYear()}-${(newDate.getMonth() + 1).toString().padStart(2, '0')}-${newDate.getDate().toString().padStart(2, '0')}`;
+      const newDateFormatted = format(newDate, "d 'de' MMMM", { locale: es });
+
+      // Actualizar la cita con nueva fecha y hora
+      await updateDocumentNonBlocking(appointmentDocRef, { 
+        date: formattedNewDate,
+        time: newTime,
+        rescheduledBy: 'admin',
+        rescheduledAt: new Date(),
+        previousDate: appointmentToReschedule.date,
+        previousTime: appointmentToReschedule.time,
+      });
+
+      // Crear notificación para el paciente
+      const notificationsCol = collection(firestore, 'notifications');
+      console.log('Creando notificación para paciente:', appointmentToReschedule.patientId);
+      await addDocumentNonBlocking(notificationsCol, {
+        userId: appointmentToReschedule.patientId,
+        type: 'appointment_rescheduled',
+        title: 'Cita Reprogramada',
+        message: `Tu cita ha sido reprogramada. Fecha anterior: ${oldDate} a las ${oldTime}. Nueva fecha: ${newDateFormatted} a las ${newTime}.`,
+        relatedId: appointmentToReschedule.id,
+        read: false,
+        createdAt: new Date(),
+      });
+
+      // Crear notificación para el médico
+      console.log('Creando notificación para médico:', appointmentToReschedule.doctorId);
+      await addDocumentNonBlocking(notificationsCol, {
+        userId: appointmentToReschedule.doctorId,
+        type: 'appointment_rescheduled',
+        title: 'Cita Reprogramada',
+        message: `La cita con ${appointmentToReschedule.patientName} ha sido reprogramada. Fecha anterior: ${oldDate} a las ${oldTime}. Nueva fecha: ${newDateFormatted} a las ${newTime}.`,
+        relatedId: appointmentToReschedule.id,
+        read: false,
+        createdAt: new Date(),
+      });
+
+      console.log('Notificaciones creadas exitosamente');
+
+      toast({
+        title: "Cita Reprogramada",
+        description: `La cita ha sido reprogramada exitosamente. Se ha notificado al paciente y al médico.`,
+      });
+
+      setRescheduleDialogOpen(false);
+      setAppointmentToReschedule(null);
+      setNewDate(undefined);
+      setNewTime('');
+    } catch (error) {
+      console.error('Error rescheduling appointment:', error);
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "No se pudo reprogramar la cita. Intenta nuevamente.",
+      });
+    }
   };
 
   return (
@@ -264,7 +519,7 @@ export default function AdminCitasPage() {
                    <Button type="button" variant="secondary">Cancelar</Button>
                 </DialogClose>
                 <Button type="submit" onClick={handleCreateAppointment}>
-                  <CalendarPlus className="mr-2 h-4 w-4" />
+                  <PlusCircle className="mr-2 h-4 w-4" />
                   Crear Cita
                 </Button>
               </DialogFooter>
@@ -332,7 +587,7 @@ export default function AdminCitasPage() {
                         <TableCell className="text-right"><Skeleton className="h-8 w-8" /></TableCell>
                     </TableRow>
                 ))}
-                {appointments?.map((appointment: any) => (
+                {sortedAppointments?.map((appointment: any) => (
                   <TableRow key={appointment.id}>
                     <TableCell className="font-medium">{appointment.patientName}</TableCell>
                     <TableCell>{appointment.doctorName}</TableCell>
@@ -353,9 +608,27 @@ export default function AdminCitasPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                          <DropdownMenuItem><FileText className="mr-2 h-4 w-4" />Ver Detalles</DropdownMenuItem>
-                          <DropdownMenuItem><CalendarPlus className="mr-2 h-4 w-4" />Reprogramar</DropdownMenuItem>
-                          <DropdownMenuItem className="text-destructive focus:text-destructive"><XCircle className="mr-2 h-4 w-4" />Cancelar Cita</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleViewDetails(appointment)}>
+                            <FileText className="mr-2 h-4 w-4" />Ver Detalles
+                          </DropdownMenuItem>
+                          {appointment.status === 'pendiente' && (
+                            <>
+                              <DropdownMenuItem onClick={() => handleAcceptAppointment(appointment)}>
+                                <Check className="mr-2 h-4 w-4" />Aceptar Cita
+                              </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleOpenRescheduleDialog(appointment)}>
+                                <CalendarClock className="mr-2 h-4 w-4" />Reprogramar
+                              </DropdownMenuItem>
+                            </>
+                          )}
+                          {appointment.status !== 'cancelada' && appointment.status !== 'completada' && appointment.status !== 'expirada' && (
+                            <DropdownMenuItem 
+                              className="text-destructive focus:text-destructive"
+                              onClick={() => handleOpenCancelDialog(appointment)}
+                            >
+                              <XCircle className="mr-2 h-4 w-4" />Cancelar Cita
+                            </DropdownMenuItem>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </TableCell>
@@ -364,33 +637,281 @@ export default function AdminCitasPage() {
               </TableBody>
             </Table>
           </CardContent>
-           { !isLoadingAppointments && appointments?.length === 0 && (
+           { !isLoadingAppointments && sortedAppointments?.length === 0 && (
                 <CardFooter className="py-8 justify-center">
                     <p className="text-muted-foreground">No hay citas registradas en el sistema.</p>
                 </CardFooter>
             )}
         </Card>
 
-        <div className="grid gap-4">
-          {appointments?.map((appointment) => (
-            <div key={appointment.id} className="flex justify-between items-center p-4 border rounded">
-              <div>
-                <p><strong>Paciente:</strong> {appointment.patientName}</p>
-                <p><strong>Médico:</strong> {appointment.doctorName}</p>
-                <p><strong>Fecha:</strong> {appointment.date}</p>
-                <p><strong>Estado:</strong> {appointment.status}</p>
+        {/* Dialog para ver detalles de la cita */}
+        <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+          <DialogContent className="max-w-2xl">
+            <DialogHeader>
+              <DialogTitle>Detalles de la Cita</DialogTitle>
+              <DialogDescription>
+                Información completa sobre la cita médica
+              </DialogDescription>
+            </DialogHeader>
+
+            {selectedAppointment && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Paciente</p>
+                    <p className="font-medium">{selectedAppointment.patientName}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Médico</p>
+                    <p className="font-medium">{selectedAppointment.doctorName}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Servicio</p>
+                    <p className="font-medium">{selectedAppointment.serviceName}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Fecha</p>
+                    <p className="font-medium">
+                      {format(parseLocalDate(selectedAppointment.date), 'PPP', { locale: es })}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Hora</p>
+                    <p className="font-medium">{selectedAppointment.time}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Estado</p>
+                    <Badge variant={getStatusVariant(selectedAppointment.status)}>
+                      {selectedAppointment.status?.charAt(0).toUpperCase() + selectedAppointment.status?.slice(1)}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Tipo de Consulta</p>
+                    <p className="font-medium">{selectedAppointment.consultationType || 'Presencial'}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Precio</p>
+                    <p className="font-medium">${new Intl.NumberFormat('es-CO').format(selectedAppointment.price || 0)}</p>
+                  </div>
+                </div>
+
+                {selectedAppointment.reason && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Motivo de Consulta</p>
+                    <div className="bg-muted p-4 rounded-lg">
+                      <p className="text-sm">{selectedAppointment.reason}</p>
+                    </div>
+                  </div>
+                )}
+
+                {selectedAppointment.diagnosis && (
+                  <div className="space-y-2">
+                    <p className="text-sm font-semibold">Diagnóstico</p>
+                    <div className="bg-muted p-4 rounded-lg">
+                      <p className="text-sm whitespace-pre-wrap">{selectedAppointment.diagnosis.description}</p>
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="flex gap-2">
-                <Button onClick={() => handleAcceptAppointment(appointment.id)} disabled={appointment.status === 'confirmada'}>
-                  {appointment.status === 'confirmada' ? 'Aceptada' : 'Aceptar Cita'}
-                </Button>
-                <Button variant="destructive" onClick={() => handleCancelAppointment(appointment.id)}>
+            )}
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setDetailsDialogOpen(false)}>
+                Cerrar
+              </Button>
+              {selectedAppointment?.status !== 'cancelada' && selectedAppointment?.status !== 'completada' && selectedAppointment?.status !== 'expirada' && (
+                <Button 
+                  variant="destructive" 
+                  onClick={() => {
+                    handleOpenCancelDialog(selectedAppointment);
+                    setDetailsDialogOpen(false);
+                  }}
+                >
+                  <XCircle className="mr-2 h-4 w-4" />
                   Cancelar Cita
                 </Button>
+              )}
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* AlertDialog para confirmar cancelación de cita */}
+        <AlertDialog open={cancelDialogOpen} onOpenChange={setCancelDialogOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertTriangle className="h-5 w-5 text-destructive" />
+                ¿Cancelar esta cita?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta acción cancelará la cita y notificará tanto al paciente como al médico.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+
+            {appointmentToCancel && (
+              <div className="space-y-4 py-4">
+                <div className="rounded-lg bg-muted p-4 space-y-2">
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="font-semibold">Paciente:</span>
+                      <p>{appointmentToCancel.patientName}</p>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Médico:</span>
+                      <p>{appointmentToCancel.doctorName}</p>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Servicio:</span>
+                      <p>{appointmentToCancel.serviceName}</p>
+                    </div>
+                    <div>
+                      <span className="font-semibold">Fecha:</span>
+                      <p>{format(parseLocalDate(appointmentToCancel.date), 'PPP', { locale: es })} - {appointmentToCancel.time}</p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="cancel-reason">
+                    Motivo de cancelación (opcional)
+                  </Label>
+                  <Textarea
+                    id="cancel-reason"
+                    placeholder="Ej: El médico no está disponible, cambio de horario, solicitud del paciente..."
+                    value={cancelReason}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    className="min-h-[100px]"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Este motivo se incluirá en la notificación enviada al paciente y al médico.
+                  </p>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            )}
+
+            <AlertDialogFooter>
+              <AlertDialogCancel onClick={() => {
+                setCancelReason('');
+                setAppointmentToCancel(null);
+              }}>
+                No, mantener cita
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleCancelAppointment}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              >
+                <XCircle className="mr-2 h-4 w-4" />
+                Sí, cancelar cita
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Dialog para reprogramar cita */}
+        <Dialog open={rescheduleDialogOpen} onOpenChange={setRescheduleDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Reprogramar Cita</DialogTitle>
+              <DialogDescription>
+                Selecciona una nueva fecha y hora para la cita.
+              </DialogDescription>
+            </DialogHeader>
+
+            {appointmentToReschedule && (
+              <div className="space-y-4 py-4">
+                <div className="rounded-lg bg-muted p-4 space-y-2">
+                  <p className="font-semibold text-sm">Información de la Cita</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-muted-foreground">Paciente:</span>
+                      <p className="font-medium">{appointmentToReschedule.patientName}</p>
+                    </div>
+                    <div>
+                      <span className="text-muted-foreground">Médico:</span>
+                      <p className="font-medium">{appointmentToReschedule.doctorName}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-muted-foreground">Servicio:</span>
+                      <p className="font-medium">{appointmentToReschedule.serviceName}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-muted-foreground">Fecha actual:</span>
+                      <p className="font-medium">
+                        {format(parseLocalDate(appointmentToReschedule.date), 'PPP', { locale: es })} - {appointmentToReschedule.time}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Nueva Fecha</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button 
+                          variant="outline" 
+                          className={cn('w-full justify-start text-left font-normal', !newDate && 'text-muted-foreground')}
+                        >
+                          <CalendarIcon className="mr-2 h-4 w-4" />
+                          {newDate ? format(newDate, 'PPP', { locale: es }) : <span>Seleccionar nueva fecha</span>}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0">
+                        <Calendar 
+                          mode="single" 
+                          selected={newDate} 
+                          onSelect={setNewDate} 
+                          initialFocus 
+                          locale={es}
+                          disabled={(date) => date < new Date(new Date().setHours(0, 0, 0, 0))}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label htmlFor="new-time">Nueva Hora</Label>
+                    <Select value={newTime} onValueChange={setNewTime}>
+                      <SelectTrigger id="new-time">
+                        <SelectValue placeholder="Seleccionar hora" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="08:00">08:00</SelectItem>
+                        <SelectItem value="09:00">09:00</SelectItem>
+                        <SelectItem value="10:00">10:00</SelectItem>
+                        <SelectItem value="11:00">11:00</SelectItem>
+                        <SelectItem value="14:00">14:00</SelectItem>
+                        <SelectItem value="15:00">15:00</SelectItem>
+                        <SelectItem value="16:00">16:00</SelectItem>
+                        <SelectItem value="17:00">17:00</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button 
+                  type="button" 
+                  variant="secondary"
+                  onClick={() => {
+                    setAppointmentToReschedule(null);
+                    setNewDate(undefined);
+                    setNewTime('');
+                  }}
+                >
+                  Cancelar
+                </Button>
+              </DialogClose>
+              <Button type="submit" onClick={handleRescheduleAppointment}>
+                <CalendarClock className="mr-2 h-4 w-4" />
+                Reprogramar Cita
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </>
   );

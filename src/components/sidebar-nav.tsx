@@ -52,7 +52,6 @@ const adminNavLinks = [
   { href: "/dashboard/admin/turnos", icon: Clock, label: "Gestionar Turnos" },
   { href: "/dashboard/admin/formulas", icon: FileText, label: "Gestionar Fórmulas" },
   { href: "/dashboard/admin/servicios", icon: Briefcase, label: "Gestionar Servicios" },
-  { href: "/dashboard/admin/reportes", icon: FolderOpen, label: "Historias Clínicas" },
   { href: "/dashboard/admin/estadisticas", icon: BarChart3, label: "Reportes y Estadísticas" },
 ];
 

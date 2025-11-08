@@ -126,6 +126,7 @@ export default function PersonalCitasPage() {
   const [medications, setMedications] = useState<{name: string; dosage: string}[]>([]);
   const [newMedication, setNewMedication] = useState({ name: '', dosage: '' });
   const [formulaObservations, setFormulaObservations] = useState('');
+  const [formulaExpirationDate, setFormulaExpirationDate] = useState<Date | undefined>();
   
   // Estados para reprogramar
   const [rescheduleDate, setRescheduleDate] = useState<Date | undefined>();
@@ -193,11 +194,11 @@ export default function PersonalCitasPage() {
 
   // Separar citas activas de completadas
   const activeAppointments = appointments?.filter(apt => 
-    apt.status !== 'completada' && apt.status !== 'cancelada'
+    apt.status !== 'completada' && apt.status !== 'cancelada' && apt.status !== 'expirada'
   ) || [];
   
   const completedAppointments = appointments?.filter(apt => 
-    apt.status === 'completada' || apt.status === 'cancelada'
+    apt.status === 'completada' || apt.status === 'cancelada' || apt.status === 'expirada'
   ) || [];
 
   // Filtrar citas activas
@@ -226,6 +227,21 @@ export default function PersonalCitasPage() {
     
     return true;
   }).sort((a, b) => {
+    // Primero ordenar por prioridad de estado: pendiente > confirmada > en curso
+    const statusPriority: { [key: string]: number } = {
+      'pendiente': 0,
+      'confirmada': 1,
+      'en curso': 2,
+    };
+    
+    const priorityA = statusPriority[a.status] ?? 3;
+    const priorityB = statusPriority[b.status] ?? 3;
+    
+    if (priorityA !== priorityB) {
+      return priorityA - priorityB;
+    }
+    
+    // Luego ordenar por fecha según el criterio seleccionado
     const dateA = parseLocalDate(a.date);
     const dateB = parseLocalDate(b.date);
     
@@ -517,6 +533,7 @@ export default function PersonalCitasPage() {
     setMedications([]);
     setNewMedication({ name: '', dosage: '' });
     setFormulaObservations('');
+    setFormulaExpirationDate(undefined);
     setCompleteDialogOpen(true);
   };
 
@@ -567,6 +584,15 @@ export default function PersonalCitasPage() {
       return;
     }
 
+    if (includeFormula && !formulaExpirationDate) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Debes especificar la fecha de vencimiento de la fórmula.",
+      });
+      return;
+    }
+
     try {
       // 1. Actualizar la cita con el diagnóstico
       const appointmentDocRef = doc(firestore, 'appointments', selectedAppointment.id);
@@ -600,6 +626,7 @@ export default function PersonalCitasPage() {
           doctorId: user.uid,
           doctorName: user.displayName,
           date: new Date().toISOString().split('T')[0],
+          expirationDate: formulaExpirationDate ? format(formulaExpirationDate, 'yyyy-MM-dd') : '',
           medications: medications,
           observations: formulaObservations,
           status: 'activa',
@@ -615,7 +642,7 @@ export default function PersonalCitasPage() {
           userId: selectedAppointment.patientId,
           type: 'formula_created',
           title: 'Fórmula Médica Emitida',
-          message: `El Dr. ${user.displayName} ha emitido una fórmula médica para ti con ${medications.length} medicamento(s). Revísala en la sección de fórmulas.`,
+          message: `El Dr. ${user.displayName} ha emitido una fórmula médica para ti con ${medications.length} medicamento(s). ${formulaExpirationDate ? `Válida hasta el ${format(formulaExpirationDate, 'PPP', { locale: es })}.` : ''} Revísala en la sección de fórmulas.`,
           read: false,
           relatedId: selectedAppointment.id,
           createdAt: new Date(),
@@ -636,6 +663,7 @@ export default function PersonalCitasPage() {
       setMedications([]);
       setNewMedication({ name: '', dosage: '' });
       setFormulaObservations('');
+      setFormulaExpirationDate(undefined);
     } catch (error) {
       console.error('Error al completar consulta:', error);
       toast({
@@ -1310,7 +1338,7 @@ export default function PersonalCitasPage() {
 
         {/* Dialog para completar consulta con diagnóstico */}
         <Dialog open={completeDialogOpen} onOpenChange={setCompleteDialogOpen}>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle className="text-2xl">Completar Consulta y Registrar Diagnóstico</DialogTitle>
               <DialogDescription>
@@ -1467,6 +1495,44 @@ export default function PersonalCitasPage() {
                         value={formulaObservations}
                         onChange={(e) => setFormulaObservations(e.target.value)}
                       />
+                    </div>
+
+                    {/* Fecha de Vencimiento */}
+                    <div className="space-y-2">
+                      <Label htmlFor="formula-expiration" className="flex items-center gap-1">
+                        Fecha de Vencimiento <span className="text-red-500">*</span>
+                      </Label>
+                      <p className="text-sm text-muted-foreground mb-2">
+                        Establece hasta qué fecha será válida esta fórmula médica
+                      </p>
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            className={cn(
+                              'w-full max-w-xs justify-start text-left font-normal',
+                              !formulaExpirationDate && 'text-muted-foreground'
+                            )}
+                          >
+                            <CalendarIcon className="mr-2 h-4 w-4" />
+                            {formulaExpirationDate ? (
+                              format(formulaExpirationDate, 'PPP', { locale: es })
+                            ) : (
+                              <span>Selecciona la fecha de vencimiento</span>
+                            )}
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-auto p-0" align="start">
+                          <Calendar
+                            mode="single"
+                            selected={formulaExpirationDate}
+                            onSelect={setFormulaExpirationDate}
+                            disabled={(date) => date < new Date()}
+                            initialFocus
+                            locale={es}
+                          />
+                        </PopoverContent>
+                      </Popover>
                     </div>
 
                     {medications.length === 0 && (

@@ -32,7 +32,6 @@ import {
   Search,
   PlusCircle,
   UserPlus,
-  Edit,
   ToggleLeft,
   ToggleRight,
 } from 'lucide-react';
@@ -54,7 +53,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import Link from 'next/link';
 import { useCollection, useFirestore, useMemoFirebase } from '@/firebase';
 import { collection, query, where, doc } from 'firebase/firestore';
 import { addDocumentNonBlocking, updateDocumentNonBlocking } from '@/firebase/non-blocking-updates';
@@ -80,8 +78,6 @@ export default function AdminMedicosPage() {
   const [newDoctor, setNewDoctor] = useState({ fullName: '', email: '', specialty: '' });
   const [assignForDoctorId, setAssignForDoctorId] = useState<string | null>(null);
   const [assignTemplate, setAssignTemplate] = useState<'' | ShiftTemplateKey>('');
-  const [assignDate, setAssignDate] = useState<Date | undefined>();
-  const [assignArea, setAssignArea] = useState<string>('');
   const [assignObs, setAssignObs] = useState<string>('');
   
   const firestore = useFirestore();
@@ -284,30 +280,25 @@ export default function AdminMedicosPage() {
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuLabel>Acciones</DropdownMenuLabel>
-                          <DropdownMenuItem asChild>
-                            <Link href={`/dashboard/admin/medicos/${medico.id}`}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                Editar perfil
-                            </Link>
+                          <DropdownMenuItem onClick={() => setAssignForDoctorId(medico.id)}>
+                            <PlusCircle className="mr-2 h-4 w-4" /> Asignar turno
                           </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                           {activeShiftByDoctor.has(medico.id) ? (
-                             <DropdownMenuItem
-                               className="text-destructive focus:text-destructive"
-                               onClick={() => {
-                                 const s = activeShiftByDoctor.get(medico.id);
-                                 if (!firestore || !s) return;
-                                 const ref = doc(firestore, 'shifts', s.id);
-                                 updateDocumentNonBlocking(ref, { status: 'finalizado' });
-                                 toast({ title: 'Turno finalizado', description: `Se finalizó el turno actual de ${medico.displayName}.` });
-                               }}
-                             >
-                               <ToggleLeft className="mr-2 h-4 w-4" /> Finalizar turno actual
-                             </DropdownMenuItem>
-                           ) : (
-                             <DropdownMenuItem onClick={() => setAssignForDoctorId(medico.id)}>
-                               <ToggleRight className="mr-2 h-4 w-4" /> Asignar turno
-                             </DropdownMenuItem>
+                           {activeShiftByDoctor.has(medico.id) && (
+                             <>
+                               <DropdownMenuSeparator />
+                               <DropdownMenuItem
+                                 className="text-destructive focus:text-destructive"
+                                 onClick={() => {
+                                   const s = activeShiftByDoctor.get(medico.id);
+                                   if (!firestore || !s) return;
+                                   const ref = doc(firestore, 'shifts', s.id);
+                                   updateDocumentNonBlocking(ref, { status: 'finalizado' });
+                                   toast({ title: 'Turno finalizado', description: `Se finalizó el turno actual de ${medico.displayName}.` });
+                                 }}
+                               >
+                                 <ToggleLeft className="mr-2 h-4 w-4" /> Finalizar turno actual
+                               </DropdownMenuItem>
+                             </>
                            )}
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -320,11 +311,11 @@ export default function AdminMedicosPage() {
         </Card>
 
         {/* Dialogo Asignar turno rápido */}
-  <Dialog open={!!assignForDoctorId} onOpenChange={(o) => !o && (setAssignForDoctorId(null), setAssignTemplate(''), setAssignDate(undefined), setAssignArea(''), setAssignObs(''))}>
+  <Dialog open={!!assignForDoctorId} onOpenChange={(o) => !o && (setAssignForDoctorId(null), setAssignTemplate(''), setAssignObs(''))}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
               <DialogTitle>Asignar turno</DialogTitle>
-              <DialogDescription>Selecciona tipo y fecha para asignar un turno al médico.</DialogDescription>
+              <DialogDescription>Selecciona el tipo de turno. El turno se asignará para hoy.</DialogDescription>
             </DialogHeader>
             <div className="grid gap-4 py-4">
               <div className="space-y-2">
@@ -341,40 +332,26 @@ export default function AdminMedicosPage() {
                 </Select>
               </div>
               <div className="space-y-2">
-                <Label>Fecha</Label>
-                <Input type="date" value={assignDate ? format(assignDate, 'yyyy-MM-dd') : ''} onChange={(e) => setAssignDate(e.target.value ? new Date(e.target.value + 'T00:00:00') : undefined)} />
-              </div>
-              <div className="space-y-2">
-                <Label>Área / Servicio</Label>
-                <Select onValueChange={(v) => setAssignArea(v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Seleccionar área" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="Urgencias">Urgencias</SelectItem>
-                    <SelectItem value="Consulta Externa">Consulta Externa</SelectItem>
-                    <SelectItem value="Pediatría">Pediatría</SelectItem>
-                    <SelectItem value="Medicina General">Medicina General</SelectItem>
-                    <SelectItem value="Cardiología">Cardiología</SelectItem>
-                    <SelectItem value="Dermatología">Dermatología</SelectItem>
-                    <SelectItem value="Psicología">Psicología</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Observaciones</Label>
-                <Input placeholder="Ej: Turno diurno completo" value={assignObs} onChange={(e) => setAssignObs(e.target.value)} />
+                <Label>Observaciones (opcional)</Label>
+                <Input placeholder="Notas adicionales sobre el turno..." value={assignObs} onChange={(e) => setAssignObs(e.target.value)} />
               </div>
               {assignTemplate && (
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <Label>Inicio</Label>
-                    <Input disabled value={SHIFT_TEMPLATES[assignTemplate].startTime} />
+                <div className="space-y-2">
+                  <Label>Horario del turno</Label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Inicio</Label>
+                      <Input disabled value={SHIFT_TEMPLATES[assignTemplate].startTime} />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Fin</Label>
+                      <Input disabled value={SHIFT_TEMPLATES[assignTemplate].endTime} />
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label>Fin</Label>
-                    <Input disabled value={SHIFT_TEMPLATES[assignTemplate].endTime} />
-                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Duración: {SHIFT_TEMPLATES[assignTemplate].durationHours} horas
+                    {SHIFT_TEMPLATES[assignTemplate].nocturno && ' • Turno nocturno'}
+                  </p>
                 </div>
               )}
             </div>
@@ -385,29 +362,28 @@ export default function AdminMedicosPage() {
               <Button
                 onClick={() => {
                   const doctor = medicos?.find((m: any) => m.id === assignForDoctorId);
-                  if (!doctor || !assignTemplate || !assignDate || !assignArea || !firestore) {
-                    toast({ variant: 'destructive', title: 'Faltan datos', description: 'Selecciona tipo, fecha y área.' });
+                  if (!doctor || !assignTemplate || !firestore) {
+                    toast({ variant: 'destructive', title: 'Faltan datos', description: 'Selecciona el tipo de turno.' });
                     return;
                   }
-                  const docToAdd = createShiftDocFromTemplate(assignTemplate, { id: doctor.id, displayName: doctor.displayName }, assignDate);
+                  // Asignar turno para hoy
+                  const today = new Date();
+                  const docToAdd = createShiftDocFromTemplate(assignTemplate, { id: doctor.id, displayName: doctor.displayName }, today);
                   const colRef = collection(firestore, 'shifts');
                   addDocumentNonBlocking(colRef, {
                     ...docToAdd,
                     date: docToAdd.startDate,
-                    area: assignArea,
                     observations: assignObs,
                     doctorRole: doctor.role,
                     doctorSpecialty: doctor.specialty,
                   });
-                  toast({ title: 'Turno asignado', description: `Asignado ${docToAdd.type} a ${doctor.displayName}.` });
+                  toast({ title: 'Turno asignado', description: `Asignado ${docToAdd.type} a ${doctor.displayName} para hoy.` });
                   setAssignForDoctorId(null);
                   setAssignTemplate('');
-                  setAssignDate(undefined);
-                  setAssignArea('');
                   setAssignObs('');
                 }}
               >
-                <PlusCircle className="mr-2 h-4 w-4" /> Asignar
+                <PlusCircle className="mr-2 h-4 w-4" /> Asignar para Hoy
               </Button>
             </DialogFooter>
           </DialogContent>

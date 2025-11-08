@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Header } from '@/components/header';
 import {
   Card,
@@ -77,7 +77,13 @@ export default function PersonalFormulasPage() {
   const [open, setOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [selectedFormulaId, setSelectedFormulaId] = useState<string | null>(null);
-  const [newFormula, setNewFormula] = useState({ patientId: '', medicationName: '', dosage: '', observations: '' });
+  const [newFormula, setNewFormula] = useState({ 
+    patientId: '', 
+    medicationName: '', 
+    dosage: '', 
+    observations: '',
+    expirationDate: '' 
+  });
   const [medications, setMedications] = useState<{name: string; dosage: string}[]>([]);
   const [patientSearchTerm, setPatientSearchTerm] = useState('');
   const [renewalDialogOpen, setRenewalDialogOpen] = useState(false);
@@ -115,6 +121,34 @@ export default function PersonalFormulasPage() {
 
   const selectedPatient = allPatients?.find(p => p.id === newFormula.patientId);
 
+  // Auto-expirar fórmulas vencidas
+  useEffect(() => {
+    if (!formulas || !firestore) return;
+
+    const checkExpiredFormulas = async () => {
+      const today = new Date().toISOString().split('T')[0];
+      
+      for (const formula of formulas) {
+        if (formula.status === 'activa' && formula.expirationDate && formula.expirationDate < today) {
+          try {
+            const { doc } = await import('firebase/firestore');
+            const formulaRef = doc(firestore, 'formulas', formula.id);
+            await import('@/firebase/non-blocking-updates').then(({ updateDocumentNonBlocking }) => {
+              updateDocumentNonBlocking(formulaRef, {
+                status: 'vencida',
+                expiredAt: new Date().toISOString(),
+              });
+            });
+          } catch (error) {
+            console.error('Error al actualizar fórmula vencida:', error);
+          }
+        }
+      }
+    };
+
+    checkExpiredFormulas();
+  }, [formulas, firestore]);
+
   const handleAddMedication = () => {
     if (newFormula.medicationName && newFormula.dosage) {
         setMedications([...medications, { name: newFormula.medicationName, dosage: newFormula.dosage }]);
@@ -134,12 +168,22 @@ export default function PersonalFormulasPage() {
       return;
     }
 
+    if (!newFormula.expirationDate) {
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Debes especificar la fecha de vencimiento de la fórmula.",
+      });
+      return;
+    }
+
     const formulaData = {
       patientId: patient.id,
       patientName: patient.displayName,
       doctorId: user.uid,
       doctorName: user.displayName,
       date: new Date().toISOString().split('T')[0],
+      expirationDate: newFormula.expirationDate,
       medications: medications,
       observations: newFormula.observations,
       status: 'activa',
@@ -155,14 +199,14 @@ export default function PersonalFormulasPage() {
       userId: patient.id,
       type: 'formula_created',
       title: 'Fórmula Médica Emitida',
-      message: `El Dr. ${user.displayName} ha emitido una fórmula médica para ti con ${medications.length} medicamento(s). Revísala en la sección de fórmulas.`,
+      message: `El Dr. ${user.displayName} ha emitido una fórmula médica para ti con ${medications.length} medicamento(s). Válida hasta el ${new Date(newFormula.expirationDate).toLocaleDateString('es-CO')}. Revísala en la sección de fórmulas.`,
       read: false,
       createdAt: new Date(),
     });
 
     toast({ title: 'Fórmula Creada', description: 'La receta ha sido enviada al paciente.' });
     setOpen(false);
-    setNewFormula({ patientId: '', medicationName: '', dosage: '', observations: '' });
+    setNewFormula({ patientId: '', medicationName: '', dosage: '', observations: '', expirationDate: '' });
     setMedications([]);
     setPatientSearchTerm('');
   };
@@ -536,6 +580,26 @@ export default function PersonalFormulasPage() {
                     onChange={e => setNewFormula(p => ({...p, observations: e.target.value}))}
                   />
                 </div>
+
+                <div className="border-t pt-6" />
+
+                {/* Sección: Fecha de Vencimiento */}
+                <div className="space-y-2">
+                  <Label htmlFor="expirationDate" className="text-base font-semibold">
+                    Fecha de Vencimiento <span className="text-red-500">*</span>
+                  </Label>
+                  <p className="text-sm text-muted-foreground mb-2">
+                    Establece hasta qué fecha será válida esta fórmula médica
+                  </p>
+                  <Input
+                    id="expirationDate"
+                    type="date"
+                    value={newFormula.expirationDate}
+                    onChange={e => setNewFormula(p => ({...p, expirationDate: e.target.value}))}
+                    min={new Date().toISOString().split('T')[0]}
+                    className="max-w-xs"
+                  />
+                </div>
               </div>
 
               <DialogFooter className="gap-2">
@@ -545,7 +609,7 @@ export default function PersonalFormulasPage() {
                 <Button 
                   type="submit" 
                   onClick={handleCreateFormula}
-                  disabled={!newFormula.patientId || medications.length === 0}
+                  disabled={!newFormula.patientId || medications.length === 0 || !newFormula.expirationDate}
                   className="gap-2"
                 >
                   <Send className="h-4 w-4" />

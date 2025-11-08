@@ -34,7 +34,6 @@ Este componente envuelve las rutas protegidas y:
   - `/dashboard/admin/formulas` - Gestión de fórmulas
   - `/dashboard/admin/citas` - Gestión de citas
   - `/dashboard/admin/estadisticas` - Estadísticas
-  - `/dashboard/admin/reportes` - Reportes
   - `/dashboard/admin/turnos` - Turnos
 
 #### 3. **Sección Personal Médico** (`/dashboard/personal/*`)

@@ -1,7 +1,7 @@
 
 'use client';
 
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Header } from '@/components/header';
 import {
   Card,
@@ -11,20 +11,6 @@ import {
   CardTitle,
   CardFooter
 } from '@/components/ui/card';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -36,11 +22,16 @@ import {
 } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import {
-  MoreHorizontal,
   Calendar as CalendarIcon,
   PlusCircle,
-  Edit,
-  Trash2
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+  Clock,
+  User,
+  Trash2,
+  CheckCircle,
 } from 'lucide-react';
 import { Calendar } from '@/components/ui/calendar';
 import {
@@ -58,8 +49,7 @@ import {
   DialogFooter,
   DialogClose
 } from '@/components/ui/dialog';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
-import { format } from 'date-fns';
+import { format, addDays, startOfWeek, endOfWeek, isSameDay, addWeeks, subWeeks, addMonths, subMonths } from 'date-fns';
 import { es } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
 import { Label } from '@/components/ui/label';
@@ -70,6 +60,7 @@ import { doc } from 'firebase/firestore';
 import { SHIFT_TEMPLATES, ShiftTemplateKey, createShiftDocFromTemplate, computeShiftStatus } from '@/lib/shifts';
 import { useToast } from '@/hooks/use-toast';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 
 const getStatusVariant = (status: string) => {
   switch (status) {
@@ -84,10 +75,25 @@ const getStatusVariant = (status: string) => {
   }
 };
 
+const getStatusColor = (status: string) => {
+  switch (status) {
+    case 'activo':
+      return 'bg-green-100 border-green-300 text-green-800';
+    case 'próximo':
+      return 'bg-blue-100 border-blue-300 text-blue-800';
+    case 'finalizado':
+      return 'bg-gray-100 border-gray-300 text-gray-600';
+    default:
+      return 'bg-gray-100 border-gray-300 text-gray-600';
+  }
+};
+
 export default function AdminTurnosPage() {
+  const [currentWeek, setCurrentWeek] = useState<Date>(new Date());
   const [date, setDate] = useState<Date | undefined>();
-  const [filterDate, setFilterDate] = useState<Date | undefined>();
   const [open, setOpen] = useState(false);
+  const [selectedShift, setSelectedShift] = useState<any>(null);
+  const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [newShift, setNewShift] = useState<{ doctorId: string; templateKey: '' | ShiftTemplateKey; observations: string;}>( { doctorId: '', templateKey: '', observations: ''});
   
   const firestore = useFirestore();
@@ -99,13 +105,25 @@ export default function AdminTurnosPage() {
   const shiftsCollectionRef = useMemoFirebase(() => firestore ? collection(firestore, 'shifts') : null, [firestore]);
   const { data: shifts, isLoading: isLoadingShifts } = useCollection(shiftsCollectionRef);
 
+  // Calcular inicio y fin de la semana actual
+  const weekStart = startOfWeek(currentWeek, { weekStartsOn: 1 }); // Lunes
+  const weekEnd = endOfWeek(currentWeek, { weekStartsOn: 1 }); // Domingo
+  
+  // Generar array de días de la semana
+  const weekDays = useMemo(() => {
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      days.push(addDays(weekStart, i));
+    }
+    return days;
+  }, [weekStart]);
+
   const parseDateString = (dateStr: string) => {
     const [year, month, day] = dateStr.split('-').map(Number);
     return new Date(year, month - 1, day);
   };
 
   const effectiveStatus = (shift: any) => {
-    // Backwards compatibility: older docs may have 'date' instead of startDate/endDate
     const startDate = shift.startDate || shift.date;
     const endDate = shift.endDate || shift.startDate || shift.date;
     const shiftDoc = {
@@ -125,28 +143,23 @@ export default function AdminTurnosPage() {
     return computeShiftStatus(shiftDoc);
   };
 
-  const formatDisplayDate = (shift: any) => {
-    const base = shift.startDate || shift.date;
-    const d = new Date(base + 'T00:00:00');
-    return format(d, 'dd/MM/yyyy', { locale: es });
+  // Obtener turnos para un día específico
+  const getShiftsForDay = (day: Date) => {
+    if (!shifts) return [];
+    return shifts.filter((shift: any) => {
+      const shiftDate = parseDateString(shift.startDate || shift.date);
+      return isSameDay(shiftDate, day);
+    });
   };
 
-  const formatHour = (hhmm: string) => {
-    if (!hhmm) return '';
-    const [h, m] = hhmm.split(':').map(Number);
-    const period = h >= 12 ? 'p.m.' : 'a.m.';
-    const hour12 = ((h + 11) % 12) + 1;
-    return `${hour12.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')} ${period}`;
-  };
-
-  const computeDurationHours = (shift: any) => {
-    if (shift.durationHours) return shift.durationHours;
-    const [sh, sm] = (shift.startTime || '00:00').split(':').map(Number);
-    const [eh, em] = (shift.endTime || '00:00').split(':').map(Number);
-    let start = sh * 60 + sm;
-    let end = eh * 60 + em;
-    if (end < start) end += 24 * 60; // spans midnight
-    return ((end - start) / 60);
+  // Obtener iniciales del médico
+  const getInitials = (name: string) => {
+    return name
+      .split(' ')
+      .map(n => n[0])
+      .join('')
+      .toUpperCase()
+      .substring(0, 2);
   };
   
   const handleAssignShift = () => {
@@ -192,22 +205,24 @@ export default function AdminTurnosPage() {
     toast({ title: 'Turno eliminado', description: `Turno de ${shift.doctorName} eliminado.` });
   };
 
+  const handleViewShift = (shift: any) => {
+    setSelectedShift(shift);
+    setDetailsDialogOpen(true);
+  };
+
   return (
     <>
       <Header />
       <div className="container mx-auto py-10 px-4 sm:px-6 lg:px-8">
+        {/* Header */}
         <div className="flex justify-between items-start mb-6">
           <div>
-            <h1 className="text-3xl font-bold font-headline">Gestión de Turnos</h1>
+            <h1 className="text-3xl font-bold font-headline">Calendario de Turnos</h1>
             <p className="text-muted-foreground">
-              Asigna y administra los turnos del personal médico.
+              Vista semanal de los turnos asignados al personal médico
             </p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" asChild>
-              <a href="/dashboard/admin/turnos/historial">Ver Historial</a>
-            </Button>
-            <Dialog open={open} onOpenChange={setOpen}>
+          <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button>
                 <PlusCircle className="mr-2 h-4 w-4" />
@@ -290,168 +305,245 @@ export default function AdminTurnosPage() {
                 </Button>
               </DialogFooter>
             </DialogContent>
-            </Dialog>
-          </div>
+          </Dialog>
         </div>
 
-        <Tabs defaultValue="gestionar" className="space-y-6">
-          <TabsList>
-            <TabsTrigger value="gestionar">Gestionar</TabsTrigger>
-            <TabsTrigger value="historial">Historial</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="gestionar" className="space-y-6">
-        <Card>
+        {/* Navegación de semanas y meses */}
+        <Card className="mb-6">
           <CardHeader>
-            <CardTitle>Filtros</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Select disabled={isLoadingDoctors}>
-              <SelectTrigger><SelectValue placeholder="Filtrar por médico" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos los médicos</SelectItem>
-                 {doctors?.map(doc => (
-                    <SelectItem key={doc.id} value={doc.id}>{doc.displayName}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-             <Popover>
-              <PopoverTrigger asChild>
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1">
                 <Button
-                  variant={'outline'}
-                  className={cn('w-full justify-start text-left font-normal', !filterDate && 'text-muted-foreground')}
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentWeek(subMonths(currentWeek, 1))}
+                  title="Mes anterior"
                 >
-                  <CalendarIcon className="mr-2 h-4 w-4" />
-                  {filterDate ? format(filterDate, 'PPP', { locale: es }) : <span>Filtrar por fecha</span>}
+                  <ChevronsLeft className="h-4 w-4" />
                 </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={filterDate} onSelect={setFilterDate} initialFocus locale={es} /></PopoverContent>
-            </Popover>
-          </CardContent>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentWeek(subWeeks(currentWeek, 1))}
+                  title="Semana anterior"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+              </div>
+              <div className="text-center flex-1">
+                <h2 className="text-lg font-semibold">
+                  {format(weekStart, "'Semana del' d", { locale: es })} - {format(weekEnd, "d 'de' MMMM, yyyy", { locale: es })}
+                </h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setCurrentWeek(new Date())}
+                  className="mt-1 text-xs"
+                >
+                  Hoy
+                </Button>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentWeek(addWeeks(currentWeek, 1))}
+                  title="Semana siguiente"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  onClick={() => setCurrentWeek(addMonths(currentWeek, 1))}
+                  title="Mes siguiente"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          </CardHeader>
         </Card>
 
-        <Card>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Médico</TableHead>
-                  <TableHead>Fecha</TableHead>
-                  <TableHead>Horario</TableHead>
-                  <TableHead>Tipo de Turno</TableHead>
-                  <TableHead>Estado</TableHead>
-                  <TableHead className="text-right">Acciones</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoadingShifts && [...Array(4)].map((_, i) => (
-                     <TableRow key={i}>
-                        <TableCell><Skeleton className="h-5 w-32" /></TableCell>
-                        <TableCell><Skeleton className="h-5 w-36" /></TableCell>
-                        <TableCell><Skeleton className="h-5 w-24" /></TableCell>
-                        <TableCell><Skeleton className="h-5 w-20" /></TableCell>
-                        <TableCell><Skeleton className="h-6 w-16 rounded-full" /></TableCell>
-                        <TableCell className="text-right"><Skeleton className="h-8 w-8" /></TableCell>
-                    </TableRow>
-                ))}
-                {shifts?.map((shift: any) => (
-                  <TableRow key={shift.id}>
-                    <TableCell className="font-medium">{shift.doctorName}</TableCell>
-                    <TableCell>{format(parseDateString(shift.startDate || shift.date), 'PPP', { locale: es })}</TableCell>
-                    <TableCell>{shift.startTime} - {shift.endTime}</TableCell>
-                    <TableCell>{shift.type}</TableCell>
-                    <TableCell>
-                      <Badge variant={getStatusVariant(effectiveStatus(shift))}>
-                        {effectiveStatus(shift).charAt(0).toUpperCase() + effectiveStatus(shift).slice(1)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" className="h-8 w-8 p-0">
-                            <span className="sr-only">Abrir menú</span>
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => handleFinalizeShift(shift)} disabled={effectiveStatus(shift) !== 'activo'}>
-                            <Edit className="mr-2 h-4 w-4" />Finalizar Turno
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onClick={() => handleDeleteShift(shift)} className="text-destructive focus:text-destructive">
-                            <Trash2 className="mr-2 h-4 w-4" />Eliminar Turno
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-           <CardFooter className="py-4 text-sm text-muted-foreground">
-             Mostrando {shifts?.length ?? 0} de {shifts?.length ?? 0} turnos.
-          </CardFooter>
-        </Card>
-          </TabsContent>
+        {/* Calendario Semanal */}
+        <div className="grid grid-cols-7 gap-2">
+          {weekDays.map((day, index) => {
+            const dayShifts = getShiftsForDay(day);
+            const isToday = isSameDay(day, new Date());
+            
+            return (
+              <Card 
+                key={index} 
+                className={cn(
+                  "min-h-[300px]",
+                  isToday && "ring-2 ring-primary"
+                )}
+              >
+                <CardHeader className="p-3">
+                  <CardTitle className="text-sm font-medium">
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs text-muted-foreground uppercase">
+                        {format(day, 'EEEE', { locale: es })}
+                      </span>
+                      <span className={cn(
+                        "text-2xl font-bold mt-1",
+                        isToday && "text-primary"
+                      )}>
+                        {format(day, 'd')}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {format(day, 'MMM', { locale: es })}
+                      </span>
+                    </div>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="p-2 space-y-2">
+                  {isLoadingShifts ? (
+                    <Skeleton className="h-20 w-full" />
+                  ) : dayShifts.length === 0 ? (
+                    <div className="text-center py-6 text-xs text-muted-foreground">
+                      Sin turnos
+                    </div>
+                  ) : (
+                    dayShifts.map((shift: any) => {
+                      const status = effectiveStatus(shift);
+                      return (
+                        <div
+                          key={shift.id}
+                          onClick={() => handleViewShift(shift)}
+                          className={cn(
+                            "p-2 rounded-lg border-l-4 cursor-pointer transition-all hover:shadow-md",
+                            getStatusColor(status)
+                          )}
+                        >
+                          <div className="flex items-start gap-2">
+                            <Avatar className="h-8 w-8 flex-shrink-0">
+                              <AvatarFallback className="text-xs">
+                                {getInitials(shift.doctorName)}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-semibold truncate">
+                                {shift.doctorName}
+                              </p>
+                              <div className="flex items-center gap-1 mt-1">
+                                <Clock className="h-3 w-3" />
+                                <span className="text-xs">
+                                  {shift.startTime}
+                                </span>
+                              </div>
+                              <p className="text-xs font-medium mt-1">
+                                {shift.type}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
 
-          <TabsContent value="historial">
-            <Card>
-              <CardHeader>
-                <CardTitle>Historial de Turnos</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0 overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead>Cargo</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Hora de inicio</TableHead>
-                      <TableHead>Hora de fin</TableHead>
-                      <TableHead>Duración (h)</TableHead>
-                      <TableHead>Observaciones</TableHead>
-                      <TableHead>Estado</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {isLoadingShifts && (
-                      <TableRow><TableCell colSpan={8} className="text-center py-6 text-sm text-muted-foreground">Cargando turnos...</TableCell></TableRow>
-                    )}
-                    {!isLoadingShifts && (shifts?.length ?? 0) === 0 && (
-                      <TableRow><TableCell colSpan={8} className="text-center py-6 text-sm text-muted-foreground">No hay turnos registrados.</TableCell></TableRow>
-                    )}
-                    {[...(shifts || [])]
-                      .sort((a: any, b: any) => {
-                        const ad = (a.startDate || a.date) ?? '';
-                        const bd = (b.startDate || b.date) ?? '';
-                        return bd.localeCompare(ad);
-                      })
-                      .map((shift: any) => {
-                        const status = effectiveStatus(shift);
-                        const dur = computeDurationHours(shift);
-                        return (
-                          <TableRow key={shift.id}>
-                            <TableCell>{shift.doctorName}</TableCell>
-                            <TableCell>{shift.doctorSpecialty || shift.doctorRole || '—'}</TableCell>
-                            <TableCell>{formatDisplayDate(shift)}</TableCell>
-                            <TableCell>{formatHour(shift.startTime)}</TableCell>
-                            <TableCell>{formatHour(shift.endTime)}</TableCell>
-                            <TableCell>{dur}</TableCell>
-                            <TableCell className="max-w-xs truncate" title={shift.observations}>{shift.observations || '—'}</TableCell>
-                            <TableCell>
-                              <Badge variant={status === 'activo' ? 'default' : status === 'próximo' ? 'secondary' : 'outline'}>
-                                {status.charAt(0).toUpperCase() + status.slice(1)}
-                              </Badge>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+        {/* Dialog de detalles del turno */}
+        <Dialog open={detailsDialogOpen} onOpenChange={setDetailsDialogOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Detalles del Turno</DialogTitle>
+            </DialogHeader>
+            {selectedShift && (
+              <div className="space-y-4">
+                <div className="flex items-center gap-3">
+                  <Avatar className="h-12 w-12">
+                    <AvatarFallback>
+                      {getInitials(selectedShift.doctorName)}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold">{selectedShift.doctorName}</p>
+                    <p className="text-sm text-muted-foreground">
+                      {selectedShift.doctorSpecialty || selectedShift.doctorRole || 'Médico'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Fecha</p>
+                    <p className="font-medium">
+                      {format(parseDateString(selectedShift.startDate || selectedShift.date), 'PPP', { locale: es })}
+                    </p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Tipo</p>
+                    <p className="font-medium">{selectedShift.type}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Hora Inicio</p>
+                    <p className="font-medium">{selectedShift.startTime}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Hora Fin</p>
+                    <p className="font-medium">{selectedShift.endTime}</p>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Estado</p>
+                    <Badge variant={getStatusVariant(effectiveStatus(selectedShift))}>
+                      {effectiveStatus(selectedShift).charAt(0).toUpperCase() + effectiveStatus(selectedShift).slice(1)}
+                    </Badge>
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm text-muted-foreground">Duración</p>
+                    <p className="font-medium">{selectedShift.durationHours || 8}h</p>
+                  </div>
+                </div>
+
+                {selectedShift.observations && (
+                  <div className="space-y-2">
+                    <p className="text-sm text-muted-foreground">Observaciones</p>
+                    <div className="bg-muted p-3 rounded-lg">
+                      <p className="text-sm">{selectedShift.observations}</p>
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex gap-2 pt-4">
+                  {effectiveStatus(selectedShift) === 'activo' && (
+                    <Button 
+                      variant="outline" 
+                      className="flex-1"
+                      onClick={() => {
+                        handleFinalizeShift(selectedShift);
+                        setDetailsDialogOpen(false);
+                      }}
+                    >
+                      <CheckCircle className="mr-2 h-4 w-4" />
+                      Finalizar Turno
+                    </Button>
+                  )}
+                  <Button 
+                    variant="destructive" 
+                    className="flex-1"
+                    onClick={() => {
+                      handleDeleteShift(selectedShift);
+                      setDetailsDialogOpen(false);
+                    }}
+                  >
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Eliminar
+                  </Button>
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <DialogClose asChild>
+                <Button variant="secondary">Cerrar</Button>
+              </DialogClose>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </>
   );

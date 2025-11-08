@@ -34,7 +34,12 @@ export default function NotificacionesPage() {
   // Sort notifications: unread first, then by date
   const sortedNotifications = notifications ? [...notifications].sort((a, b) => {
     if (a.read !== b.read) return a.read ? 1 : -1;
-    return b.createdAt?.seconds - a.createdAt?.seconds;
+    
+    // Handle missing or invalid dates
+    const aTime = a.createdAt?.seconds || 0;
+    const bTime = b.createdAt?.seconds || 0;
+    
+    return bTime - aTime;
   }) : [];
 
   const unreadCount = sortedNotifications.filter(n => !n.read).length;
@@ -157,11 +162,50 @@ export default function NotificacionesPage() {
     }
   };
 
+  const formatNotificationDate = (createdAt: any): string => {
+    try {
+      if (!createdAt) return 'Fecha no disponible';
+      
+      let date: Date;
+      
+      // Si tiene método toDate (Timestamp de Firebase)
+      if (typeof createdAt.toDate === 'function') {
+        date = createdAt.toDate();
+      }
+      // Si tiene propiedad seconds (Timestamp serializado)
+      else if (createdAt.seconds) {
+        date = new Date(createdAt.seconds * 1000);
+      }
+      // Si es un string ISO
+      else if (typeof createdAt === 'string') {
+        date = new Date(createdAt);
+      }
+      // Si ya es un Date
+      else if (createdAt instanceof Date) {
+        date = createdAt;
+      }
+      // Otro formato
+      else {
+        return 'Fecha no disponible';
+      }
+      
+      // Verificar que la fecha es válida
+      if (isNaN(date.getTime())) {
+        return 'Fecha no disponible';
+      }
+      
+      return format(date, "d 'de' MMMM 'a las' h:mm a", { locale: es });
+    } catch (error) {
+      console.error('Error formatting notification date:', error);
+      return 'Fecha no disponible';
+    }
+  };
+
   return (
     <>
       <Header />
-      <div className="container mx-auto p-4 max-w-4xl">
-        <div className="flex items-center justify-between mb-6">
+      <div className="container mx-auto p-4 max-w-4xl h-[calc(100vh-80px)] flex flex-col">
+        <div className="flex items-center justify-between mb-6 flex-shrink-0">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Bell className="h-6 w-6" />
@@ -179,36 +223,37 @@ export default function NotificacionesPage() {
           )}
         </div>
 
-        {isLoading ? (
-          <div className="space-y-4">
-            {[1, 2, 3].map((i) => (
-              <Card key={i}>
-                <CardContent className="p-4">
-                  <div className="flex items-start gap-4">
-                    <Skeleton className="h-10 w-10 rounded-full" />
-                    <div className="flex-1 space-y-2">
-                      <Skeleton className="h-4 w-3/4" />
-                      <Skeleton className="h-4 w-full" />
-                      <Skeleton className="h-3 w-1/2" />
+        <div className="flex-1 overflow-y-auto pr-2">
+          {isLoading ? (
+            <div className="space-y-4">
+              {[1, 2, 3].map((i) => (
+                <Card key={i}>
+                  <CardContent className="p-4">
+                    <div className="flex items-start gap-4">
+                      <Skeleton className="h-10 w-10 rounded-full" />
+                      <div className="flex-1 space-y-2">
+                        <Skeleton className="h-4 w-3/4" />
+                        <Skeleton className="h-4 w-full" />
+                        <Skeleton className="h-3 w-1/2" />
+                      </div>
                     </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : sortedNotifications.length === 0 ? (
-          <Card>
-            <CardContent className="flex flex-col items-center justify-center py-12">
-              <Bell className="h-16 w-16 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">No tienes notificaciones</h3>
-              <p className="text-muted-foreground text-center">
-                Cuando recibas notificaciones sobre tus citas, diagnósticos o fórmulas, aparecerán aquí.
-              </p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-3">
-            {sortedNotifications.map((notification) => {
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+          ) : sortedNotifications.length === 0 ? (
+            <Card>
+              <CardContent className="flex flex-col items-center justify-center py-12">
+                <Bell className="h-16 w-16 text-muted-foreground mb-4" />
+                <h3 className="text-lg font-semibold mb-2">No tienes notificaciones</h3>
+                <p className="text-muted-foreground text-center">
+                  Cuando recibas notificaciones sobre tus citas, diagnósticos o fórmulas, aparecerán aquí.
+                </p>
+              </CardContent>
+            </Card>
+          ) : (
+            <div className="space-y-3">
+              {sortedNotifications.map((notification) => {
               const isUpdating = updatingIds.has(notification.id);
               
               return (
@@ -240,11 +285,7 @@ export default function NotificacionesPage() {
                         
                         <div className="flex items-center justify-between">
                           <span className="text-xs text-muted-foreground">
-                            {notification.createdAt && format(
-                              new Date(notification.createdAt.seconds * 1000),
-                              "d 'de' MMMM 'a las' h:mm a",
-                              { locale: es }
-                            )}
+                            {formatNotificationDate(notification.createdAt)}
                           </span>
                           
                           <div className="flex gap-2">
@@ -279,6 +320,7 @@ export default function NotificacionesPage() {
             })}
           </div>
         )}
+        </div>
       </div>
     </>
   );
